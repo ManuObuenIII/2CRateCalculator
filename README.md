@@ -57,3 +57,9 @@ Set in `Code.gs`:
 `assets/favicon-192.png` (and the 512 / 32 px versions) is the 2C logo as a square icon. `Code.gs` points
 `setFaviconUrl` at the raw GitHub URL of the 192 px file, so it shows in the browser tab and when the app
 is added to a phone's home screen. If the repo moves, update `FAVICON_URL` in `Code.gs`.
+
+## GitHub Pages
+
+`index.html` is a landing page for GitHub Pages (https://manuobueniii.github.io/2CRateCalculator/): it shows the
+2C logo and sends visitors to the live Apps Script web app. The app itself cannot run on Pages. If the web app is
+redeployed under a new URL, update the two links in `index.html`.
