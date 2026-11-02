@@ -7,8 +7,11 @@
   <meta name="description" content="2C Trucking trailer rate calculator">
   <link rel="icon" href="assets/favicon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="assets/icon-512.png">
-  <!-- Sends visitors straight to the live app after a moment; the button below works right away -->
-  <meta http-equiv="refresh" content="3; url=https://script.google.com/macros/s/AKfycbwGq4CtgTG7Uwy6-_abqF00qlPvIB59HBqiZ2PFUErTtOtVN-y8FYjXhscIaV8v5S3s/exec">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#D93126">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="2C Calculator">
   <style>
     :root { --red: #D93126; --ink: #17191D; --soft: #6B7079; }
     * { box-sizing: border-box; }
@@ -24,6 +27,8 @@
     .btn { display: inline-block; padding: 14px 28px; background: var(--red); color: #fff; text-decoration: none; font-weight: 700;
       border-radius: 999px; box-shadow: 0 8px 20px rgba(217,49,38,.28); }
     .btn:hover { background: #bf281e; }
+    .btn.alt { margin-top: 10px; background: #fff; color: var(--red); border: 1.5px solid var(--red); box-shadow: none; cursor: pointer; font: inherit; font-weight: 700; }
+    .btn.alt:hover { background: #fff5f4; }
     .small { margin: 18px 0 0; font-size: 12px; }
     .small a { color: var(--red); }
   </style>
@@ -32,9 +37,41 @@
   <main class="card">
     <img class="logo" src="assets/icon-512.png" alt="2C Trucking">
     <h1>2C <em>Calculator</em></h1>
-    <p>Trailer rate calculator for 2C Trucking. Opening the app…</p>
-    <a class="btn" href="https://script.google.com/macros/s/AKfycbwGq4CtgTG7Uwy6-_abqF00qlPvIB59HBqiZ2PFUErTtOtVN-y8FYjXhscIaV8v5S3s/exec">Open 2C Calculator</a>
-    <p class="small">Sign in with your Google account when asked. <a href="https://github.com/ManuObuenIII/2CRateCalculator">Source code</a></p>
+    <p id="lead">Trailer rate calculator for 2C Trucking. Opening the app…</p>
+    <a class="btn" id="open" href="https://script.google.com/macros/s/AKfycbwGq4CtgTG7Uwy6-_abqF00qlPvIB59HBqiZ2PFUErTtOtVN-y8FYjXhscIaV8v5S3s/exec">Open 2C Calculator</a>
+    <button class="btn alt" id="install" hidden type="button">Install app</button>
+    <p class="small" id="hint">Sign in with your Google account when asked. <a href="https://github.com/ManuObuenIII/2CRateCalculator">Source code</a></p>
   </main>
+  <script>
+    var APP_URL = 'https://script.google.com/macros/s/AKfycbwGq4CtgTG7Uwy6-_abqF00qlPvIB59HBqiZ2PFUErTtOtVN-y8FYjXhscIaV8v5S3s/exec';
+    var installOffered = false, deferred = null;
+    var standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+      || /[?&]source=app/.test(location.search);
+    // Installed app (home-screen icon): go straight to the calculator.
+    // Opened in a normal browser tab: show the page, offer Install, then open the app after a moment.
+    if (standalone) {
+      location.replace(APP_URL);
+    } else {
+      setTimeout(function () { if (!installOffered) location.href = APP_URL; }, 4000);
+    }
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      deferred = e;
+      installOffered = true;
+      document.getElementById('lead').textContent = 'Install 2C Calculator on this device, or open it in the browser.';
+      document.getElementById('install').hidden = false;
+    });
+    document.getElementById('install').addEventListener('click', function () {
+      if (!deferred) return;
+      deferred.prompt();
+      deferred.userChoice.then(function () { deferred = null; document.getElementById('install').hidden = true; });
+    });
+    // iPhone/iPad: Safari has no install prompt; show the Share → Add to Home Screen tip
+    if (!standalone && /iPhone|iPad|iPod/.test(navigator.userAgent) && !window.MSStream) {
+      installOffered = true;
+      document.getElementById('lead').textContent = 'To install: tap Share, then "Add to Home Screen".';
+    }
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
+  </script>
 </body>
 </html>
