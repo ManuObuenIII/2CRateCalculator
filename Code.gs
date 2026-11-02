@@ -224,6 +224,8 @@ function doGet() {
     .evaluate()
     .setTitle('2C Calculator · 2C Trucking')
     .setFaviconUrl(FAVICON_URL)
+    // Lets the GitHub Pages app (manuobueniii.github.io/2CRateCalculator) show the calculator inside its own window
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 

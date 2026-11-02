@@ -60,6 +60,8 @@ is added to a phone's home screen. If the repo moves, update `FAVICON_URL` in `C
 
 ## GitHub Pages
 
-`index.html` is a landing page for GitHub Pages (https://manuobueniii.github.io/2CRateCalculator/): it shows the
-2C logo and sends visitors to the live Apps Script web app. The app itself cannot run on Pages. If the web app is
-redeployed under a new URL, update the two links in `index.html`.
+`index.html` is an installable web-app shell for GitHub Pages (https://manuobueniii.github.io/2CRateCalculator/):
+it shows the calculator inside the page (an iframe of the Apps Script web app, which `doGet` allows with
+`setXFrameOptionsMode(ALLOWALL)`), with the 2C logo as the app icon, a manifest and a service worker so it can be
+installed on phones and desktops. The calculator itself still runs on Google. If the web app is redeployed under a
+new URL, update `APP_URL` and the two links in `index.html`.

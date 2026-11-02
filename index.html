@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>2C Calculator · 2C Trucking</title>
   <meta name="description" content="2C Trucking trailer rate calculator">
   <link rel="icon" href="assets/favicon-192.png" type="image/png">
@@ -15,50 +15,72 @@
   <style>
     :root { --red: #D93126; --ink: #17191D; --soft: #6B7079; }
     * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--ink);
+    html, body { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--ink);
       background: linear-gradient(160deg, #fff5f4 0%, #ffffff 45%, #fde9e7 100%); }
+    /* The calculator fills the window; the landing card shows until it has loaded */
+    #app { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; opacity: 0; transition: opacity .3s; }
+    #app.on { opacity: 1; }
+    #splash { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; transition: opacity .3s; }
+    #splash.off { opacity: 0; pointer-events: none; }
     .card { width: min(100%, 440px); padding: 40px 32px; text-align: center; background: rgba(255,255,255,.85);
       border: 1px solid rgba(217,49,38,.15); border-radius: 24px; box-shadow: 0 24px 60px rgba(23,25,29,.10); }
     .logo { width: 150px; height: auto; display: block; margin: 0 auto 18px; }
     h1 { margin: 0 0 6px; font-size: 30px; font-weight: 400; font-family: Georgia, "Times New Roman", serif; }
     h1 em { font-style: italic; color: var(--red); }
-    p { margin: 0 0 24px; color: var(--soft); font-size: 14px; line-height: 1.5; }
+    p { margin: 0 0 20px; color: var(--soft); font-size: 14px; line-height: 1.5; }
     .btn { display: inline-block; padding: 14px 28px; background: var(--red); color: #fff; text-decoration: none; font-weight: 700;
-      border-radius: 999px; box-shadow: 0 8px 20px rgba(217,49,38,.28); }
+      border-radius: 999px; box-shadow: 0 8px 20px rgba(217,49,38,.28); border: 0; font: inherit; font-weight: 700; cursor: pointer; }
     .btn:hover { background: #bf281e; }
-    .btn.alt { margin-top: 10px; background: #fff; color: var(--red); border: 1.5px solid var(--red); box-shadow: none; cursor: pointer; font: inherit; font-weight: 700; }
+    .btn.alt { margin-top: 10px; background: #fff; color: var(--red); border: 1.5px solid var(--red); box-shadow: none; }
     .btn.alt:hover { background: #fff5f4; }
     .small { margin: 18px 0 0; font-size: 12px; }
     .small a { color: var(--red); }
+    .spin { width: 22px; height: 22px; margin: 0 auto 14px; border: 3px solid #f3d4d1; border-top-color: var(--red); border-radius: 50%; animation: s 1s linear infinite; }
+    @keyframes s { to { transform: rotate(360deg); } }
+    /* small "open in browser" escape hatch, for when Google sign-in refuses to work inside the app window */
+    #out { position: fixed; right: 10px; bottom: 10px; z-index: 5; padding: 8px 12px; font-size: 12px; color: var(--soft);
+      background: rgba(255,255,255,.9); border: 1px solid rgba(23,25,29,.12); border-radius: 999px; text-decoration: none; opacity: 0; transition: opacity .3s; }
+    #out.on { opacity: 1; }
+    #out:hover { color: var(--red); }
   </style>
 </head>
 <body>
-  <main class="card">
-    <img class="logo" src="assets/icon-512.png" alt="2C Trucking">
-    <h1>2C <em>Calculator</em></h1>
-    <p id="lead">Trailer rate calculator for 2C Trucking. Opening the app…</p>
-    <a class="btn" id="open" href="https://script.google.com/macros/s/AKfycbwGq4CtgTG7Uwy6-_abqF00qlPvIB59HBqiZ2PFUErTtOtVN-y8FYjXhscIaV8v5S3s/exec">Open 2C Calculator</a>
-    <button class="btn alt" id="install" hidden type="button">Install app</button>
-    <p class="small" id="hint">Sign in with your Google account when asked. <a href="https://github.com/ManuObuenIII/2CRateCalculator">Source code</a></p>
-  </main>
+  <iframe id="app" title="2C Calculator" allow="clipboard-write; geolocation" referrerpolicy="no-referrer-when-downgrade"></iframe>
+  <a id="out" href="https://script.google.com/macros/s/AKfycbwGq4CtgTG7Uwy6-_abqF00qlPvIB59HBqiZ2PFUErTtOtVN-y8FYjXhscIaV8v5S3s/exec" target="_blank" rel="noopener">Open in browser ↗</a>
+
+  <div id="splash">
+    <main class="card">
+      <img class="logo" src="assets/icon-512.png" alt="2C Trucking">
+      <h1>2C <em>Calculator</em></h1>
+      <div class="spin" id="spin"></div>
+      <p id="lead">Loading the calculator…</p>
+      <button class="btn alt" id="install" hidden type="button">Install app</button>
+      <p class="small"><a id="openLink" href="https://script.google.com/macros/s/AKfycbwGq4CtgTG7Uwy6-_abqF00qlPvIB59HBqiZ2PFUErTtOtVN-y8FYjXhscIaV8v5S3s/exec" target="_blank" rel="noopener">Open in the browser instead</a> · <a href="https://github.com/ManuObuenIII/2CRateCalculator">Source code</a></p>
+    </main>
+  </div>
+
   <script>
     var APP_URL = 'https://script.google.com/macros/s/AKfycbwGq4CtgTG7Uwy6-_abqF00qlPvIB59HBqiZ2PFUErTtOtVN-y8FYjXhscIaV8v5S3s/exec';
-    var installOffered = false, deferred = null;
-    var standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
-      || /[?&]source=app/.test(location.search);
-    // Installed app (home-screen icon): go straight to the calculator.
-    // Opened in a normal browser tab: show the page, offer Install, then open the app after a moment.
-    if (standalone) {
-      location.replace(APP_URL);
-    } else {
-      setTimeout(function () { if (!installOffered) location.href = APP_URL; }, 4000);
+    var app = document.getElementById('app'), splash = document.getElementById('splash');
+    var shown = false;
+    function showApp() {
+      if (shown) return;
+      shown = true;
+      app.classList.add('on');
+      splash.classList.add('off');
+      document.getElementById('out').classList.add('on');
     }
+    app.addEventListener('load', showApp);
+    app.src = APP_URL;
+    // If nothing has come back after a while, show the app frame anyway (it may be asking for sign-in)
+    setTimeout(showApp, 6000);
+
+    // Install button (Chrome / Edge / Android); Safari on iPhone uses Share → Add to Home Screen
+    var deferred = null;
     window.addEventListener('beforeinstallprompt', function (e) {
       e.preventDefault();
       deferred = e;
-      installOffered = true;
-      document.getElementById('lead').textContent = 'Install 2C Calculator on this device, or open it in the browser.';
       document.getElementById('install').hidden = false;
     });
     document.getElementById('install').addEventListener('click', function () {
@@ -66,11 +88,6 @@
       deferred.prompt();
       deferred.userChoice.then(function () { deferred = null; document.getElementById('install').hidden = true; });
     });
-    // iPhone/iPad: Safari has no install prompt; show the Share → Add to Home Screen tip
-    if (!standalone && /iPhone|iPad|iPod/.test(navigator.userAgent) && !window.MSStream) {
-      installOffered = true;
-      document.getElementById('lead').textContent = 'To install: tap Share, then "Add to Home Screen".';
-    }
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
   </script>
 </body>
