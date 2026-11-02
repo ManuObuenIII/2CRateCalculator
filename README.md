@@ -63,5 +63,7 @@ is added to a phone's home screen. If the repo moves, update `FAVICON_URL` in `C
 `index.html` is an installable web-app shell for GitHub Pages (https://manuobueniii.github.io/2CRateCalculator/):
 it shows the calculator inside the page (an iframe of the Apps Script web app, which `doGet` allows with
 `setXFrameOptionsMode(ALLOWALL)`), with the 2C logo as the app icon, a manifest and a service worker so it can be
-installed on phones and desktops. The calculator itself still runs on Google. If the web app is redeployed under a
-new URL, update `APP_URL` and the two links in `index.html`.
+installed on phones and desktops. The calculator itself still runs on Google. On iPhone/iPad, Safari and in-app browsers (Messenger, Facebook…)
+Google's sign-in does not work inside a frame (it answers "401 malformed"), so there the shell opens the calculator as
+its own page instead; the installed home-screen app on iPhone goes straight to it. If the web app is redeployed under
+a new URL, update `APP_URL` and the two links in `index.html`.

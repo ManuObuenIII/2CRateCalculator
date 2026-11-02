@@ -62,7 +62,17 @@
 
   <script>
     var APP_URL = 'https://script.google.com/macros/s/AKfycbwGq4CtgTG7Uwy6-_abqF00qlPvIB59HBqiZ2PFUErTtOtVN-y8FYjXhscIaV8v5S3s/exec';
-    var app = document.getElementById('app'), splash = document.getElementById('splash');
+    var app = document.getElementById('app'), splash = document.getElementById('splash'), lead = document.getElementById('lead');
+    var ua = navigator.userAgent;
+    var standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+      || /[?&]source=app/.test(location.search);
+    // Safari / iPhone / iPad and in-app browsers (Messenger, Facebook, Instagram, Viber, Line) block Google's sign-in
+    // cookies inside an embedded frame (Google answers "401 malformed"), so there the calculator opens as its own page.
+    var ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var inApp = /FBAN|FBAV|FB_IAB|Messenger|Instagram|Viber|Line\/|MicroMessenger|Snapchat|Twitter/i.test(ua);
+    var safari = /Safari/.test(ua) && !/Chrome|CriOS|Chromium|Edg|Android/.test(ua);
+    var embed = !(ios || inApp || safari);
+
     var shown = false;
     function showApp() {
       if (shown) return;
@@ -71,15 +81,28 @@
       splash.classList.add('off');
       document.getElementById('out').classList.add('on');
     }
-    app.addEventListener('load', showApp);
-    app.src = APP_URL;
-    // If nothing has come back after a while, show the app frame anyway (it may be asking for sign-in)
-    setTimeout(showApp, 6000);
+    if (embed) {
+      app.addEventListener('load', showApp);
+      app.src = APP_URL;
+      setTimeout(showApp, 6000);   // still waiting after 6 s: show the frame anyway (it may be asking for sign-in)
+    } else if (standalone) {
+      location.replace(APP_URL);   // installed on iPhone: go straight to the calculator
+    } else {
+      document.getElementById('spin').hidden = true;
+      lead.innerHTML = inApp
+        ? 'Open this page in Safari or Chrome to install it (tap the … menu, then "Open in browser").'
+        : (ios ? 'To install: tap the <b>Share</b> button in Safari, then <b>Add to Home Screen</b>. Or open the calculator now.'
+               : 'Open the calculator, or install it from the browser menu.');
+      var open = document.createElement('a');
+      open.className = 'btn'; open.href = APP_URL; open.textContent = 'Open 2C Calculator';
+      lead.parentNode.insertBefore(open, lead.nextSibling);
+    }
 
     // Install button (Chrome / Edge / Android); Safari on iPhone uses Share → Add to Home Screen
     var deferred = null;
     window.addEventListener('beforeinstallprompt', function (e) {
       e.preventDefault();
+      if (ios) return;   // iPhone/iPad install via Share → Add to Home Screen
       deferred = e;
       document.getElementById('install').hidden = false;
     });

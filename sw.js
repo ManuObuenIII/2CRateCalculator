@@ -1,6 +1,6 @@
 // Minimal service worker so the landing page can be installed as an app.
 // It caches only the landing page and its icons; the calculator itself always loads live from Google.
-var CACHE = '2c-calculator-shell-v2';
+var CACHE = '2c-calculator-shell-v3';
 var FILES = ['./', './index.html', './manifest.json', './assets/favicon-192.png', './assets/icon-512.png', './assets/icon-512-maskable.png'];
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(FILES); }).then(function () { return self.skipWaiting(); }));
