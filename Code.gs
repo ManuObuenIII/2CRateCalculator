@@ -9,6 +9,10 @@ var TRUCK_TYPE = 'Trailer';
 var ORIGIN = 'Manila Port, Manila, Philippines';
 var ORIGIN_LABEL = 'Manila Port';
 
+// Browser-tab / home-screen icon for the web app: the 2C logo as a square PNG, served from the GitHub repo.
+// Apps Script needs a public PNG/ICO URL for this (data: URLs are not accepted).
+var FAVICON_URL = 'https://raw.githubusercontent.com/ManuObuenIII/2CRateCalculator/main/assets/favicon-192.png';
+
 // Trailers don't take the car route. Southbound trips always run through the NLEX Connector
 // (C-3 Road/5th Ave. to Magsaysay), then city streets to SLEX. Google Maps is made to pass these
 // two points so the distance follows the trailer route. Northbound trips use Harbor Link to NLEX.
@@ -218,7 +222,8 @@ function saveSettings(values) {
 function doGet() {
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
-    .setTitle('2CCalculator · 2C Trucking')
+    .setTitle('2C Calculator · 2C Trucking')
+    .setFaviconUrl(FAVICON_URL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 

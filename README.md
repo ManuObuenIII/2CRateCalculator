@@ -1,4 +1,4 @@
-# 2CCalculator
+# 2C Calculator
 
 2C Trucking's trailer rate calculator: a Google Apps Script web app with a Google Sheets back end.
 It prices a trailer trip from Manila Port (MICT), produces the client proposal and the internal cost
@@ -51,3 +51,9 @@ Set in `Code.gs`:
   R-10 → Harbor Link (Karuhatan); Pasig area via Osmeña or Mindanao Ave corridors; Malabon /
   Valenzuela / Caloocan via the Harbor Link; EDSA (Magallanes–North Ave) is avoided.
 - Address data: PSGC via github.com/bendlikeabamboo/barangay (MIT).
+
+## App icon
+
+`assets/favicon-192.png` (and the 512 / 32 px versions) is the 2C logo as a square icon. `Code.gs` points
+`setFaviconUrl` at the raw GitHub URL of the 192 px file, so it shows in the browser tab and when the app
+is added to a phone's home screen. If the repo moves, update `FAVICON_URL` in `Code.gs`.
