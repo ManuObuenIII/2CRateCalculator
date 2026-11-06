@@ -490,7 +490,12 @@
     .master-table input.km { width: 90px; }
     .master-table .row-x { border: 0; background: none; color: var(--red); font-size: 18px; line-height: 1; cursor: pointer; padding: 6px 8px; border-radius: 8px; }
     .master-table .row-x:hover { background: rgba(217, 49, 38, 0.08); }
-    #addMasterBtn { margin: 12px 0 0; }
+    #addMasterBtn, #addMatrixBtn { margin: 12px 0 0; }
+    #matrixTable td:first-child, #matrixTable th:first-child { width: auto; font-weight: inherit; }
+    #matrixTable td:last-child { width: 1%; }
+    #matrixTable input.km { width: 110px; }
+    #matrixTable .row-x { border: 0; background: none; color: var(--red); font-size: 18px; line-height: 1; cursor: pointer; padding: 6px 8px; border-radius: 8px; }
+    #matrixTable .row-x:hover { background: rgba(217, 49, 38, 0.08); }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
     .fuel-current {
@@ -1360,9 +1365,10 @@
       .backdrop .b3 { width: 240px; height: 240px; }
       .card { padding: 20px 16px; }
       fieldset { margin-bottom: 12px; }
-      .masthead { flex-direction: column; align-items: flex-start; gap: 14px; padding: 20px 18px; }
-      .brand-plate { width: 112px; }
-      .masthead h1 { font-size: 30px; }
+      /* Phones: just the 2C logo, centred. Desktop keeps the logo with the "2C Calculator" title. */
+      .masthead { justify-content: center; padding: 14px 18px; }
+      .masthead > div:not(.brand-plate) { display: none; }
+      .brand-plate { width: 150px; }
       .app-tabs { display: grid; grid-template-columns: 1fr 1fr; width: 100%; margin: 12px 0 var(--gutter); border-radius: 20px; }
       .app-tabs button { padding: 10px 8px; font-size: 13px; border-radius: 14px; }
       .app-tabs button:nth-last-child(2):nth-child(odd) { grid-column: span 2; }   /* last tab (the thumb comes after it) */
@@ -1721,13 +1727,14 @@
       <div class="glass card">
         <div class="matrix-intro">
           <h2><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.5"/><path d="M12 3.5v6M4.4 15l5.4-1.8M19.6 15l-5.4-1.8"/></svg></span>Driver rate matrix</h2>
-          <p>The calculator takes the driver rate from this table, based on the one-way distance to the destination. Saved changes apply to the next proposal.</p>
+          <p>The calculator takes the driver rate from this table, based on the one-way distance to the destination. Add, remove or change the km brackets and rates here; saving writes them to the sheet and applies to the next proposal.</p>
         </div>
         <div id="matrixStatus" class="matrix-status">Loading driver rates…</div>
         <table class="matrix-table" id="matrixTable" hidden>
-          <thead><tr><th>Distance, one way</th><th>Driver rate (₱)</th></tr></thead>
+          <thead><tr><th>Min km</th><th>Max km</th><th>Driver rate (₱)</th><th><span class="sr-only">Remove</span></th></tr></thead>
           <tbody id="matrixBody"></tbody>
         </table>
+        <button type="button" id="addMatrixBtn" class="btn-glass" onclick="addMatrixRow()" hidden>+ Add bracket</button>
         <button type="button" id="saveMatrixBtn" class="btn-red" onclick="saveMatrix()" hidden>Save driver rates</button>
         <a id="matrixLink" class="toll-lookup matrix-link" href="#" target="_blank" hidden>Open the matrix spreadsheet</a>
       </div>
@@ -3771,26 +3778,72 @@
     }
 
     // ---------- driver rate matrix ----------
-    function renderMatrix(data) {
-      var body = document.getElementById('matrixBody');
-      var missing = 0;
-      body.innerHTML = data.rows.map(function (r) {
-        if (r.rate === null) missing++;
-        return '<tr><td>' + esc(r.label) + '</td><td><input type="number" min="0" step="0.01" data-row="' + r.row + '"'
-          + ' value="' + (r.rate === null ? '' : r.rate) + '" placeholder="Not set"'
-          + ' oninput="this.classList.toggle(\'missing\', this.value === \'\')"'
-          + (r.rate === null ? ' class="missing"' : '') + ' aria-label="Driver rate for ' + esc(r.label) + '"></td></tr>';
+    // Driver rate matrix: brackets (Min km, Max km) and rates are edited here, then the whole list is saved
+    var MATRIX_ROWS = [];
+    function matrixLabel(r) {
+      var min = r.minKm === '' ? '?' : r.minKm;
+      return r.maxKm === '' || r.maxKm === null ? min + ' km & above' : min + '–' + r.maxKm + ' km';
+    }
+    function matrixCell(i, key, label, cls, step) {
+      var v = MATRIX_ROWS[i][key];
+      var blank = v === null || v === '' || v === undefined;
+      var allowBlank = key === 'maxKm';
+      return '<td><input type="number" min="0" step="' + step + '" data-i="' + i + '" data-key="' + key + '"'
+        + ' class="' + cls + (blank && !allowBlank ? ' missing' : '') + '"'
+        + ' value="' + (blank ? '' : v) + '" placeholder="' + (allowBlank ? 'and above' : 'Not set') + '"'
+        + ' oninput="matrixTyped(this)" aria-label="' + label + ', ' + esc(matrixLabel(MATRIX_ROWS[i])) + '"></td>';
+    }
+    function matrixTyped(el) {
+      var i = Number(el.getAttribute('data-i')), key = el.getAttribute('data-key');
+      MATRIX_ROWS[i][key] = el.value;
+      if (key !== 'maxKm') el.classList.toggle('missing', el.value === '');
+    }
+    function drawMatrix() {
+      document.getElementById('matrixBody').innerHTML = MATRIX_ROWS.map(function (r, i) {
+        return '<tr>'
+          + matrixCell(i, 'minKm', 'Min km', 'km', 1)
+          + matrixCell(i, 'maxKm', 'Max km', 'km', 1)
+          + matrixCell(i, 'rate', 'Driver rate', '', 0.01)
+          + '<td><button type="button" class="row-x" title="Remove this bracket" aria-label="Remove ' + esc(matrixLabel(r)) + '" onclick="removeMatrixRow(' + i + ')">×</button></td>'
+          + '</tr>';
       }).join('');
+    }
+    // New bracket after the last one: an open-ended last bracket gets a Max km, the new one becomes "and above"
+    function addMatrixRow() {
+      var last = MATRIX_ROWS[MATRIX_ROWS.length - 1];
+      var row = { minKm: '', maxKm: '', rate: '' };
+      if (last && last.minKm !== '') {
+        if (last.maxKm === '' || last.maxKm === null) last.maxKm = Number(last.minKm) + 49;
+        row.minKm = Number(last.maxKm) + 1;
+        row.maxKm = Number(last.maxKm) + 50;
+      }
+      MATRIX_ROWS.push(row);
+      drawMatrix();
+    }
+    function removeMatrixRow(i) {
+      if (MATRIX_ROWS.length <= 1) { toastError('Keep at least one bracket.'); return; }
+      MATRIX_ROWS.splice(i, 1);
+      drawMatrix();
+    }
+
+    function renderMatrix(data) {
+      MATRIX_ROWS = (data.rows || []).map(function (r) {
+        return { minKm: r.min, maxKm: r.max === null || r.max === undefined ? '' : r.max, rate: r.rate === null ? '' : r.rate };
+      });
+      if (!MATRIX_ROWS.length) MATRIX_ROWS = [{ minKm: 1, maxKm: 15, rate: '' }];
+      drawMatrix();
+      var missing = MATRIX_ROWS.filter(function (r) { return r.rate === ''; }).length;
       var status = document.getElementById('matrixStatus');
       if (missing) {
         status.className = 'matrix-status warn';
-        status.innerText = missing + ' of ' + data.rows.length + ' brackets have no driver rate yet. Trips in those brackets can\'t be calculated until a rate is set.';
+        status.innerText = missing + ' of ' + MATRIX_ROWS.length + ' brackets have no driver rate yet. Trips in those brackets can\'t be calculated until a rate is set.';
       } else {
         status.className = 'matrix-status';
-        status.innerText = 'All ' + data.rows.length + ' brackets have a driver rate.';
+        status.innerText = 'All ' + MATRIX_ROWS.length + ' brackets have a driver rate. Brackets must follow on with no gaps; leave Max km blank on the last one for "and above".';
       }
       document.getElementById('matrixTable').hidden = false;
       document.getElementById('saveMatrixBtn').hidden = false;
+      document.getElementById('addMatrixBtn').hidden = false;
       var link = document.getElementById('matrixLink');
       link.href = data.url;
       link.hidden = false;
@@ -3812,11 +3865,8 @@
 
     function saveMatrix() {
       var btn = document.getElementById('saveMatrixBtn');
-      var inputs = document.querySelectorAll('#matrixBody input');
-      var rates = [];
-      for (var i = 0; i < inputs.length; i++) {
-        rates.push({ row: Number(inputs[i].getAttribute('data-row')), rate: inputs[i].value });
-      }
+      var rates = MATRIX_ROWS.map(function (r) { return { minKm: r.minKm, maxKm: r.maxKm, rate: r.rate }; });
+
       busy(btn, 'Saving…');
       google.script.run
         .withSuccessHandler(function (data) {

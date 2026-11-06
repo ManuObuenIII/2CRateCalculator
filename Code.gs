@@ -607,7 +607,9 @@ function getMatrixSheet_() {
   var values = sh.getDataRange().getValues();
 
   // Add default brackets that start past the farthest bracket already in the sheet
+  // (only until the brackets have been edited from the app; after that the app's list is the whole list)
   var farthest = 0;
+  if (PropertiesService.getScriptProperties().getProperty('DM_BRACKETS_EDITED')) farthest = Infinity;
   for (var m = 1; m < values.length; m++) farthest = Math.max(farthest, Number(values[m][1]) || 0);
   var extra = DRIVER_MATRIX_BRACKETS.filter(function (b) { return b[0] > farthest; });
   if (farthest > 0 && extra.length) {
@@ -642,32 +644,58 @@ function getDriverMatrix() {
   var values = getMatrixSheet_().getDataRange().getValues();
   var out = [];
   for (var i = 1; i < values.length; i++) {
-    var min = Number(values[i][0]);
-    var max = Number(values[i][1]);
-    if (!min && !max) continue;
+    var min = cellNum_(values[i][0]);
+    var max = cellNum_(values[i][1]);
+    if (min === null) continue;
     var rate = values[i][3];
     out.push({
       row: i + 1,
       min: min,
       max: max,
-      label: min + ' – ' + max + ' km',
+      label: matrixLabel_(min, max),
       rate: (rate === '' || rate === null) ? null : Number(rate)
     });
   }
+  out.sort(function (a, b) { return a.min - b.min; });
   return { rows: out, url: 'https://docs.google.com/spreadsheets/d/' + DRIVER_MATRIX_ID + '/edit' };
 }
+function matrixLabel_(min, max) { return max === null ? min + ' km & above' : min + ' – ' + max + ' km'; }
 
-// rates: [{ row: 2, rate: 1500 }, ...]. Blank rate clears the cell.
-function saveDriverMatrix(rates) {
-  var sh = getMatrixSheet_();
-  (rates || []).forEach(function (r) {
-    var row = Number(r.row);
-    if (!row || row < 2) return;
-    var val = (r.rate === '' || r.rate === null || r.rate === undefined) ? '' : Number(r.rate);
-    if (val !== '' && (isNaN(val) || val < 0)) throw new Error('Driver rates must be numbers of 0 or more.');
-    sh.getRange(row, 4).setValue(val);
+// rows: [{ minKm, maxKm, rate }, ...] — the whole list, any order. Max km blank = "and above" (last bracket only).
+// Brackets must follow on with no gaps or overlaps. Blank rate clears the cell.
+// Everything is checked before anything is written; then the sheet's bracket rows are replaced.
+function saveDriverMatrix(rows) {
+  var list = (rows || []).map(function (r) {
+    var min = Number(r.minKm);
+    var max = r.maxKm === '' || r.maxKm === null || r.maxKm === undefined ? null : Number(r.maxKm);
+    if (!(min >= 1) || Math.floor(min) !== min) throw new Error('Each bracket needs a whole-number Min km of 1 or more.');
+    if (max !== null && (!(max >= min) || Math.floor(max) !== max)) throw new Error('Max km must be a whole number, at least the Min km (bracket from ' + min + ' km).');
+    var rate = (r.rate === '' || r.rate === null || r.rate === undefined) ? '' : Number(r.rate);
+    if (rate !== '' && (isNaN(rate) || rate < 0)) throw new Error('Driver rates must be numbers of 0 or more.');
+    return { min: min, max: max, rate: rate };
   });
-  sh.getRange(2, 4, Math.max(1, sh.getLastRow() - 1), 1).setNumberFormat('#,##0.00');
+  if (!list.length) throw new Error('Keep at least one bracket.');
+  list.sort(function (a, b) { return a.min - b.min; });
+  for (var i = 0; i < list.length - 1; i++) {
+    var b = list[i], next = list[i + 1];
+    if (b.max === null) throw new Error('Only the last bracket can be "and above". Set a Max km for the ' + b.min + ' km bracket.');
+    if (next.min !== b.max + 1) {
+      throw new Error('Brackets must follow on: after ' + b.min + '–' + b.max + ' km the next should start at ' + (b.max + 1) + ' km, not ' + next.min + ' km.');
+    }
+  }
+  var sh = getMatrixSheet_();
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var last = sh.getLastRow();
+    if (last >= 2) sh.getRange(2, 1, last - 1, 4).clearContent();
+    sh.getRange(2, 1, list.length, 4).setValues(list.map(function (b) {
+      return [b.min, b.max === null ? '' : b.max, matrixLabel_(b.min, b.max), b.rate];
+    }));
+    sh.getRange(2, 4, list.length, 1).setNumberFormat('#,##0.00');
+    PropertiesService.getScriptProperties().setProperty('DM_BRACKETS_EDITED', '1');
+    SpreadsheetApp.flush();
+  } finally { lock.releaseLock(); }
   return getDriverMatrix();
 }
 
@@ -1412,12 +1440,12 @@ function getDriverRateFromMatrix_(km) {
   var sh = getMatrixSheet_();
   var values = sh.getDataRange().getValues();
   for (var i = 1; i < values.length; i++) {
-    var min = Number(values[i][0]);
-    var max = Number(values[i][1]);
-    if (!min && !max) continue;
-    if (km >= min && km <= max) {
+    var min = cellNum_(values[i][0]);
+    var max = cellNum_(values[i][1]);
+    if (min === null) continue;
+    if (km >= min && (max === null || km <= max)) {
       var rate = values[i][3];
-      var bracket = min + ' – ' + max + ' km';
+      var bracket = matrixLabel_(min, max);
       if (rate === '' || rate === null) {
         throw new Error('No driver rate set for the ' + bracket + ' bracket in the Driver Rate Matrix sheet. Fill it in, then try again.');
       }
