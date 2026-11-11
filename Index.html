@@ -2326,6 +2326,10 @@
       } else if (below && r.targetRate > 0) {
         h += '<div class="note warn-note">Net income is below the ' + pct(r.targetNetIncomePct) + ' target. A gross rate of '
           + fmt(r.targetRate) + ' would be needed to reach it.</div>';
+      } else if (r.discount > 0 && r.discountFloored) {
+        h += '<div class="note">The rate card total of ' + fmt(r.cardRate) + ' would earn more than the ' + pct(r.targetNetIncomePct)
+          + ' target net income. The discount is capped so the billed rate does not go below the basic rate of ' + fmt(r.rateCard.baseRate)
+          + ', so net income stays above the target.</div>';
       } else if (r.discount > 0) {
         h += '<div class="note">The rate card total of ' + fmt(r.cardRate) + ' would earn more than the ' + pct(r.targetNetIncomePct)
           + ' target net income, so ' + fmt(r.discount) + ' is given to the client as a discount and the billed rate lands on the target.</div>';

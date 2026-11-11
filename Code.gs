@@ -320,10 +320,13 @@ function calculateRateFromWeb(data) {
   // Target net income: the billed rate always lands on the target net income %.
   // Rate card above the target → the difference is a discount to the client.
   // Rate card below the target → the shortfall is added to the rate (an adjustment).
-  var discount = 0, adjustment = 0;
-  if (targetRate > 0 && cardRate > targetRate) discount = Math.round((cardRate - targetRate) * 100) / 100;
+  // The discount never takes the billed rate below the basic rate (the brokerage's or the standard one).
+  var discount = 0, adjustment = 0, floorRate = rateCard.baseRate;
+  if (targetRate > 0 && cardRate > targetRate) discount = Math.round((cardRate - Math.max(targetRate, floorRate)) * 100) / 100;
   if (targetRate > 0 && cardRate < targetRate) adjustment = Math.round((targetRate - cardRate) * 100) / 100;
+  if (discount < 0) discount = 0;
   var grossRate = cardRate - discount + adjustment;
+  var floored = discount > 0 && grossRate <= floorRate + 0.005;   // discount was capped at the basic rate
   var adminCost = grossRate * adminPct;
   var grossProfit = grossRate - totalExpenses;
   var netIncome = grossProfit - adminCost;
@@ -397,6 +400,7 @@ function calculateRateFromWeb(data) {
     discountPct: cardRate > 0 ? discount / cardRate : 0,
     adjustment: adjustment,
     adjustmentPct: cardRate > 0 ? adjustment / cardRate : 0,
+    discountFloored: floored,
     grossRate: grossRate,
     taxType: taxType,
     taxAmount: taxAmount,
