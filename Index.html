@@ -2049,7 +2049,7 @@
 
       h += section('Rate computation');
       // A rate adjustment (net income below target) is not shown to the client: it is folded into the basic rate
-      // so the lines still add up to the total. A discount is shown as its own line.
+      // so the lines still add up to the total.
       var adj = r.adjustment > 0 ? r.adjustment : 0;
       h += lineItem('Basic rate', 'Covers the first ' + rc.coveredKm + ' km, one way', fmt(rc.baseRate + adj));
       if (rc.excessKm <= 0) {
@@ -2069,10 +2069,6 @@
         h += lineItem('Fuel surcharge', fuelWork, fmt(rc.fuelSurcharge));
       }
 
-      if (r.discount > 0) {
-        h += row('Rate card total', fmt(r.cardRate), 'bold');
-        h += lineItem('Discount', pct(r.discountPct) + ' off the rate card total', '− ' + fmt(r.discount));
-      }
       if (isVat) {
         h += row('Subtotal (VAT exclusive)', fmt(r.grossRate), 'bold');
         h += row('VAT (' + pct(r.vatRate || 0.12) + ')', fmt(r.taxAmount));
@@ -2295,8 +2291,7 @@
 
       h += section('Billed rate');
       h += rateCardRows(rc);
-      if (r.discount > 0 || r.adjustment > 0) h += row('Rate card total', fmt(r.cardRate), 'bold');
-      if (r.discount > 0) h += row('Less discount to client (' + pct(r.discountPct) + ', net income above the ' + pct(r.targetNetIncomePct) + ' target)', '− ' + fmt(r.discount));
+      if (r.adjustment > 0) h += row('Rate card total', fmt(r.cardRate), 'bold');
       if (r.adjustment > 0) h += row('Add rate adjustment (' + pct(r.adjustmentPct) + ', net income below the ' + pct(r.targetNetIncomePct) + ' target)', '+ ' + fmt(r.adjustment));
       h += row('Gross rate', fmt(r.grossRate), 'bold');
       if (isVat) {
@@ -2326,13 +2321,6 @@
       } else if (below && r.targetRate > 0) {
         h += '<div class="note warn-note">Net income is below the ' + pct(r.targetNetIncomePct) + ' target. A gross rate of '
           + fmt(r.targetRate) + ' would be needed to reach it.</div>';
-      } else if (r.discount > 0 && r.discountFloored) {
-        h += '<div class="note">The rate card total of ' + fmt(r.cardRate) + ' would earn more than the ' + pct(r.targetNetIncomePct)
-          + ' target net income. The discount is capped so the billed rate does not go below the basic rate of ' + fmt(r.rateCard.baseRate)
-          + ', so net income stays above the target.</div>';
-      } else if (r.discount > 0) {
-        h += '<div class="note">The rate card total of ' + fmt(r.cardRate) + ' would earn more than the ' + pct(r.targetNetIncomePct)
-          + ' target net income, so ' + fmt(r.discount) + ' is given to the client as a discount and the billed rate lands on the target.</div>';
       }
       h += routeReviewHtml(r);
       return h;
@@ -4458,7 +4446,7 @@
       var dec = function (n, d) { var x = Number(n); return isFinite(x) ? String(+x.toFixed(d)) : ''; };
       var pod = function (km) { var k = Math.round((Number(km) || 0) * 10) / 10; return (k % 1 ? k.toFixed(1) : String(k)) + ' KM'; };
       var head = ['ADDRESS', '', '', '', '', 'POD', 'BASIC RATE', 'COVERED KM', 'EXCESS KM', 'RATE PER KM', 'BRACKET', 'RATE VARIABLE',
-        'ROUND TRIP KM', 'KM/L', 'LITERS', 'DIESEL PRICE', 'DIESEL DATE', 'BENCHMARK', 'SURCHARGE PER L', 'FUEL', 'DISCOUNT', 'TOTAL',
+        'ROUND TRIP KM', 'KM/L', 'LITERS', 'DIESEL PRICE', 'DIESEL DATE', 'BENCHMARK', 'SURCHARGE PER L', 'FUEL', 'TOTAL',
         'VAT', 'TOTAL WITH VAT'];
       var internal = (document.querySelector('#csvFor input:checked') || {}).value === 'internal';
       if (internal) head.splice(head.indexOf('TOTAL'), 0, 'ADJUSTMENT');   // the client file folds an adjustment into the basic rate
@@ -4477,8 +4465,8 @@
           w.bracketLabel || '', peso(p.variable),
           dec((Number(excess) || 0) * mult, 1) + ' KM', w.kmPerLiter ? dec(w.kmPerLiter, 2) : '', dec(liters, 2) + ' L',
           peso(w.fuelPrice || p.fuelPrice), w.fuelPriceDate ? formatDate(w.fuelPriceDate) : '',
-          w.fuelBenchmark !== undefined ? peso(w.fuelBenchmark) : '', peso(perL), peso(p.fuelSurcharge),
-          w.discount ? '− ' + peso(w.discount) : ''].concat(internal ? [adj ? '+ ' + peso(adj) : ''] : []).concat([peso(p.grossRate),
+          w.fuelBenchmark !== undefined ? peso(w.fuelBenchmark) : '', peso(perL), peso(p.fuelSurcharge)]
+          .concat(internal ? [adj ? '+ ' + peso(adj) : ''] : []).concat([peso(p.grossRate),
           vat ? peso(p.taxAmount) : 'Non-VAT', peso(p.finalRate)]).concat(!internal ? [] : [
           peso(p.fuelCost), peso(p.driverSalary), peso(p.tollFee), peso(p.maintCost), peso(p.additionalExpenses),
           peso(p.adminCost), peso(p.totalExpenses), (Number(p.netPct) || 0).toFixed(2) + '%', peso(p.netIncome)]);

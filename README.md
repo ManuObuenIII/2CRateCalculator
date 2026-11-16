@@ -30,9 +30,9 @@ Set in `Code.gs`:
    variable (excess km × bracket ₱/km) + fuel surcharge (excess km × round-trip multiplier ÷ bracket
    km/L × diesel price above the benchmark).
 2. **Trip cost** (internal): fuel, maintenance (fixed + per round-trip km), driver (matrix), tolls, other.
-3. **Target net income**: the billed rate is moved to land exactly on the target net income % —
-   a **discount** (shown to the client) when the rate card is above target, a **rate adjustment**
-   (folded into the basic rate on the client proposal, itemised on the internal sheet) when below.
+3. **Target net income**: the rate card is billed in full. When it would earn less than the target
+   net income %, a **rate adjustment** tops it up to the target (folded into the basic rate on the
+   client proposal, itemised on the internal sheet). No discount is given when it earns more.
 4. VAT on top when the proposal is VAT.
 
 ## Deploying

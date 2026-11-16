@@ -311,22 +311,17 @@ function calculateRateFromWeb(data) {
   // ---- Billed rate: rate card ----
   var brokerRate = brokerBaseRate_(data.brokerId);
   var rateCard = computeTrailerRateCard_(podKm, fuelPrice, ml, brokerRate);
-  var cardRate = rateCard.total;   // rate card total before any discount
+  var cardRate = rateCard.total;   // rate card total before any adjustment
 
   // Rate that would hit the Admin + Net Income targets exactly
   var expensePct = 1.0 - (adminPct + netIncomePct);
   var targetRate = expensePct > 0 ? totalExpenses / expensePct : 0;
 
-  // Target net income: the billed rate always lands on the target net income %.
-  // Rate card above the target → the difference is a discount to the client.
-  // Rate card below the target → the shortfall is added to the rate (an adjustment).
-  // The discount never takes the billed rate below the basic rate (the brokerage's or the standard one).
-  var discount = 0, adjustment = 0, floorRate = rateCard.baseRate;
-  if (targetRate > 0 && cardRate > targetRate) discount = Math.round((cardRate - Math.max(targetRate, floorRate)) * 100) / 100;
+  // Target net income: the rate card is billed in full. If it would earn less than the target net income %,
+  // the shortfall is added to the rate (an adjustment). No discount is ever given when it earns more.
+  var adjustment = 0;
   if (targetRate > 0 && cardRate < targetRate) adjustment = Math.round((targetRate - cardRate) * 100) / 100;
-  if (discount < 0) discount = 0;
-  var grossRate = cardRate - discount + adjustment;
-  var floored = discount > 0 && grossRate <= floorRate + 0.005;   // discount was capped at the basic rate
+  var grossRate = cardRate + adjustment;
   var adminCost = grossRate * adminPct;
   var grossProfit = grossRate - totalExpenses;
   var netIncome = grossProfit - adminCost;
@@ -396,11 +391,9 @@ function calculateRateFromWeb(data) {
     targetRate: targetRate,
     rateCard: rateCard,
     cardRate: cardRate,
-    discount: discount,
-    discountPct: cardRate > 0 ? discount / cardRate : 0,
+    discount: 0,
     adjustment: adjustment,
     adjustmentPct: cardRate > 0 ? adjustment / cardRate : 0,
-    discountFloored: floored,
     grossRate: grossRate,
     taxType: taxType,
     taxAmount: taxAmount,
@@ -2360,7 +2353,7 @@ function saveToDatabase(record, pdfs) {
       rc.excessKm || '',                 // AC Rate card: excess km
       rc.variable || '',                 // AD Rate card: variable
       rc.liters || '',                   // AE Rate card: surcharge liters
-      rc.fuelSurcharge || '',            // AF Rate card: fuel surcharge (gross rate in Q is after any target-income discount)
+      rc.fuelSurcharge || '',            // AF Rate card: fuel surcharge (gross rate in Q includes any target-income adjustment)
       record.driverBracket,              // AG Driver rate matrix bracket used
       record.kmPerLiter,                 // AH Fuel efficiency used (km/L, masterlist bracket)
       record.maintPerKm,                 // AI Maintenance per km used (₱/km, from Settings)
@@ -2486,7 +2479,7 @@ function withRateWorking_(p) {
       podKm: rec.podKm, coveredKm: rc.coveredKm, excessKm: rc.excessKm, variablePerKm: rc.variablePerKm,
       bracketLabel: rc.bracketLabel, distanceMultiplier: rc.distanceMultiplier, kmPerLiter: rc.bracketKmPerLiter,
       liters: rc.liters, fuelPrice: rec.fuelPrice, fuelPriceDate: rec.fuelPriceDate, fuelBenchmark: rc.fuelBenchmark,
-      surchargePerLiter: rc.surchargePerLiter, discount: rec.discount || 0, adjustment: rec.adjustment || 0
+      surchargePerLiter: rc.surchargePerLiter, adjustment: rec.adjustment || 0
     };
   } catch (e) { /* unreadable JSON: amounts only */ }
   return p;
