@@ -1804,15 +1804,38 @@
   <div class="modal" id="portalLogin" hidden role="dialog" aria-modal="true" aria-labelledby="plTitle">
     <div class="modal-bg"></div>
     <div class="modal-panel glass">
-      <h3 id="plTitle">Brokerage sign-in</h3>
-      <p class="modal-sub">Enter the access code 2C Trucking gave your brokerage. You can then price trips for your clients and download the client proposal.</p>
-      <div class="form-group">
-        <label for="plCode">Access code</label>
-        <input type="text" id="plCode" maxlength="40" autocomplete="off" autocapitalize="characters" placeholder="e.g. ONECRYSTAL-2026">
+      <div id="plStep1">
+        <h3 id="plTitle">Brokerage sign-in</h3>
+        <p class="modal-sub">Sign in with the email and password 2C Trucking sent you. You can then price trips for your clients and download the client proposal.</p>
+        <div class="form-group">
+          <label for="plEmail">Email</label>
+          <input type="email" id="plEmail" maxlength="120" autocomplete="username" placeholder="name@company.com">
+        </div>
+        <div class="form-group">
+          <label for="plPass">Password</label>
+          <input type="password" id="plPass" maxlength="80" autocomplete="current-password">
+        </div>
+        <div class="hint" id="plHint"></div>
+        <div class="form-actions">
+          <button type="button" class="btn-red" id="plGo" onclick="portalSignIn()">Sign in</button>
+        </div>
+        <div class="hint" style="margin-top:10px">Forgot your password? Ask 2C Trucking to reset it; a new temporary password will be emailed to you.</div>
       </div>
-      <div class="hint" id="plHint"></div>
-      <div class="form-actions">
-        <button type="button" class="btn-red" id="plGo" onclick="portalSignIn()">Sign in</button>
+      <div id="plStep2" hidden>
+        <h3>Choose your password</h3>
+        <p class="modal-sub">You signed in with a temporary password. Set your own to keep using the portal.</p>
+        <div class="form-group">
+          <label for="plNew">New password (at least 8 characters)</label>
+          <input type="password" id="plNew" maxlength="80" autocomplete="new-password">
+        </div>
+        <div class="form-group">
+          <label for="plNew2">Repeat the new password</label>
+          <input type="password" id="plNew2" maxlength="80" autocomplete="new-password">
+        </div>
+        <div class="hint" id="plHint2"></div>
+        <div class="form-actions">
+          <button type="button" class="btn-red" id="plSet" onclick="portalSetPassword()">Save password</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1893,8 +1916,9 @@
     // Two proposal viewers: the calculator's result, and a saved proposal opened from the Proposals tab
     // Brokerage portal (the second deployment, run as the owner): set by the server when the page is built
     var PORTAL = <?!= brokerMode ? 'true' : 'false' ?>;
-    var PORTAL_CODE = '';
-    try { PORTAL_CODE = PORTAL ? (localStorage.getItem('2c_portal_code') || '') : ''; } catch (e) { /* storage off */ }
+    var PORTAL_CODE = '';   // the session token from portalSignIn (kept on this device until it expires or Sign out)
+    var PORTAL_EMAIL = '';
+    try { PORTAL_CODE = PORTAL ? (localStorage.getItem('2c_portal_token') || '') : ''; } catch (e) { /* storage off */ }
     if (PORTAL) document.body.className += ' portal';
 
     var viewers = {
@@ -3032,7 +3056,7 @@
             portalFormsSetup();
             document.getElementById('portalAddClient').hidden = false;
             document.getElementById('portalAddAddr').hidden = false;
-            document.getElementById('portalName').innerText = b.name;
+            document.getElementById('portalName').innerText = b.name + (PORTAL_EMAIL || d.email ? ' · ' + (PORTAL_EMAIL || d.email) : '');
             document.getElementById('portalChip').hidden = false;
             document.getElementById('mastLead').innerText = 'Price a trailer trip from Manila Port for one of your clients and download the client proposal.';
           }
@@ -3042,10 +3066,40 @@
         })
         .withFailureHandler(function (error) {
           PORTAL_CODE = '';
-          try { localStorage.removeItem('2c_portal_code'); } catch (e) { /* fine */ }
+          try { localStorage.removeItem('2c_portal_token'); } catch (e) { /* fine */ }
           portalAsk(error.message);
         })
         .brokerLogin(PORTAL_CODE);
+    }
+    // Applies a successful sign-in: keeps the token, then loads the brokerage (or asks for a new password first)
+    function portalSignedIn(d) {
+      PORTAL_CODE = d.token;
+      PORTAL_EMAIL = d.email || '';
+      try { localStorage.setItem('2c_portal_token', d.token); } catch (e) { /* kept for this visit only */ }
+      if (d.mustChange) {
+        document.getElementById('plStep1').hidden = true;
+        document.getElementById('plStep2').hidden = false;
+        idle(document.getElementById('plSet'), 'Save password');
+        setTimeout(function () { document.getElementById('plNew').focus(); }, 50);
+        return;
+      }
+      portalLoad();
+    }
+    function portalSetPassword() {
+      var a = document.getElementById('plNew').value, b = document.getElementById('plNew2').value;
+      var hint = document.getElementById('plHint2');
+      if (a.length < 8) { hint.className = 'hint warn'; hint.innerText = 'Use at least 8 characters.'; return; }
+      if (a !== b) { hint.className = 'hint warn'; hint.innerText = 'The two passwords do not match.'; return; }
+      busy(document.getElementById('plSet'), 'Saving…');
+      google.script.run
+        .withSuccessHandler(function () {
+          toast('Password saved.', 'ok');
+          document.getElementById('plStep2').hidden = true;
+          document.getElementById('plStep1').hidden = false;
+          portalLoad();
+        })
+        .withFailureHandler(function (error) { hint.className = 'hint warn'; hint.innerText = error.message; idle(document.getElementById('plSet'), 'Save password'); })
+        .portalChangePassword(PORTAL_CODE, a);
     }
     function portalAsk(msg) {
       document.getElementById('brokerSel').innerHTML = option('', 'Sign in to see your clients', true);
@@ -3053,17 +3107,23 @@
       hint.className = 'hint' + (msg ? ' warn' : '');
       hint.innerText = msg || '';
       idle(document.getElementById('plGo'), 'Sign in');
+      document.getElementById('plStep1').hidden = false;
+      document.getElementById('plStep2').hidden = true;
       document.getElementById('portalLogin').hidden = false;
       document.body.style.overflow = 'hidden';
-      setTimeout(function () { document.getElementById('plCode').focus(); }, 50);
+      setTimeout(function () { document.getElementById('plEmail').focus(); }, 50);
     }
     function portalSignIn() {
-      var code = document.getElementById('plCode').value.replace(/\s+/g, '');
-      if (!code) { portalAsk('Enter your access code.'); return; }
-      PORTAL_CODE = code;
-      try { localStorage.setItem('2c_portal_code', code); } catch (e) { /* kept for this visit only */ }
+      var email = document.getElementById('plEmail').value.trim(), pass = document.getElementById('plPass').value;
+      if (!email || !pass) { portalAsk('Enter your email and password.'); return; }
       busy(document.getElementById('plGo'), 'Signing in…');
-      portalLoad();
+      google.script.run
+        .withSuccessHandler(function (d) {
+          bcData(d);
+          portalSignedIn(d);
+        })
+        .withFailureHandler(function (error) { portalAsk(error.message); })
+        .portalSignIn(email, pass);
     }
     // The client and address forms are moved into a modal, since the Brokerages & clients tab is hidden in the portal
     var portalFormsReady = false;
@@ -3118,10 +3178,11 @@
 
     function portalSignOut() {
       PORTAL_CODE = '';
-      try { localStorage.removeItem('2c_portal_code'); } catch (e) { /* fine */ }
+      try { localStorage.removeItem('2c_portal_token'); } catch (e) { /* fine */ }
       location.reload();
     }
-    document.getElementById('plCode').addEventListener('keydown', function (e) { if (e.key === 'Enter') portalSignIn(); });
+    document.getElementById('plPass').addEventListener('keydown', function (e) { if (e.key === 'Enter') portalSignIn(); });
+    document.getElementById('plNew2').addEventListener('keydown', function (e) { if (e.key === 'Enter') portalSetPassword(); });
 
     // Takes fresh data from the server and keeps the admin selection valid
     var serverWarned = false;
@@ -3312,7 +3373,7 @@
         var n = clientsOf(b.id).length;
         var who = [b.contactPerson, b.position].filter(Boolean).map(esc).join(', ');
         var sub = ['Base rate ' + (b.baseRate ? fmt(b.baseRate) : fmt(STANDARD_BASE_RATE) + ' (standard)'), who, esc(b.contactNumber), esc(b.email),
-                   b.accessCode ? 'Portal code ' + esc(b.accessCode) : 'No portal access'].filter(Boolean).join(' · ');
+                   (b.portalUsers || []).length ? 'Portal: ' + b.portalUsers.map(function (u) { return esc(u.email); }).join(', ') : 'No portal users'].filter(Boolean).join(' · ');
         sub += '<br>' + ENCLOSURES.map(function (d) {
           var f = b[d[0]], short = d[0] === 'moa' ? 'MOA' : d[1];
           return f && f.id ? '<span class="doc-tag ok">' + short + ' uploaded</span>' : '<span class="doc-tag no">No ' + short + '</span>';
@@ -3401,11 +3462,9 @@
         + '<div class="col form-group"><label for="bfEmail">Email address</label>'
         + '<input type="email" id="bfEmail" maxlength="120" value="' + esc(b.email) + '" placeholder="e.g. name@company.com"></div></div>'
         + '<div class="hint">The contact person, position and email appear under the brokerage name on the proposal.</div>'
-        + '<div class="form-sub">Brokerage portal</div>'
-        + '<div class="form-group"><label for="bfCode">Portal access code</label>'
-        + '<div class="row"><div class="col"><input type="text" id="bfCode" maxlength="40" autocomplete="off" value="' + esc(b.accessCode || '') + '" placeholder="Blank = no portal access"></div>'
-        + '<div class="col" style="flex:0 0 auto"><button type="button" class="btn-glass" style="width:auto" onclick="document.getElementById(\'bfCode\').value = makeAccessCode(document.getElementById(\'bfName\').value)">Generate</button></div></div>'
-        + '<div class="hint">Give this code to the brokerage. With it they can sign in to the brokerage portal link and generate client proposals for their own clients only.</div></div>'
+        + '<div class="form-sub">Brokerage portal users</div>'
+        + '<div id="portalUsers">' + (id ? portalUsersHtml(b)
+            : '<div class="hint">Save the brokerage first, then add the email addresses that may sign in to the portal.</div>') + '</div>'
         + '<div class="form-sub">Documents (PDF, up to 10 MB each)</div>'
         + '<div id="brokerDocs">' + (id ? brokerDocsHtml(b)
             : '<div class="hint">Save the brokerage first, then upload its MOA and Truck Agreement here.</div>') + '</div>'
@@ -3470,12 +3529,48 @@
         .removeBrokerFile(brokerId, kind);
     }
 
-    // "ONECRYSTAL-7K3M": the brokerage name's first letters plus 4 random characters
-    function makeAccessCode(name) {
-      var base = String(name || 'BROKER').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) || 'BROKER';
-      var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', tail = '';
-      for (var i = 0; i < 4; i++) tail += chars[Math.floor(Math.random() * chars.length)];
-      return base + '-' + tail;
+    // Portal users of a brokerage: add an email (a temporary password is made and emailed), reset or remove
+    function portalUsersHtml(b) {
+      var list = b.portalUsers || [];
+      return '<div class="doc-rows">' + (list.length ? list.map(function (u) {
+          return '<div class="doc-row"><div class="doc-main"><span class="doc-name">' + esc(u.email) + '</span><span class="doc-file">'
+            + (u.mustChange ? 'Temporary password, not yet changed' : 'Last sign-in ' + (u.lastSignIn ? esc(u.lastSignIn) : 'never')) + '</span></div>'
+            + '<div class="doc-actions"><button type="button" class="link-btn" onclick="addPortalUser(\'' + b.id + '\', \'' + esc(u.email) + '\', this)">Reset password</button>'
+            + '<button type="button" class="link-btn danger" onclick="removePortalUser(\'' + b.id + '\', \'' + esc(u.email) + '\')">Remove</button></div></div>';
+        }).join('') : '<div class="hint">No one can sign in to the portal for this brokerage yet.</div>')
+        + '</div><div class="row" style="margin-top:10px"><div class="col"><input type="email" id="puEmail" maxlength="120" placeholder="name@brokerage.com"></div>'
+        + '<div class="col" style="flex:0 0 auto"><button type="button" class="btn-glass accent" style="width:auto" onclick="addPortalUser(\'' + b.id + '\', document.getElementById(\'puEmail\').value, this)">Add user</button></div></div>'
+        + '<div class="hint">Adding an email creates a temporary password and emails it with the portal link. The person sets their own password on first sign-in.</div>'
+        + '<div id="puNote"></div>';
+    }
+    function addPortalUser(brokerId, email, btn) {
+      email = String(email || '').trim();
+      if (!email) { toastError('Enter the email address.'); return; }
+      busy(btn, 'Adding…');
+      google.script.run
+        .withSuccessHandler(function (r) {
+          var b = findBroker(brokerId);
+          if (b) b.portalUsers = r.users;
+          document.getElementById('portalUsers').innerHTML = portalUsersHtml(b || { id: brokerId, portalUsers: r.users });
+          document.getElementById('puNote').innerHTML = '<div class="auto-note"><b>' + esc(r.email) + '</b> can now sign in. Temporary password: <b>' + esc(r.tempPassword) + '</b>'
+            + (r.mailed ? '<br>It has been emailed to them with the portal link.' : '<br><b>The email could not be sent</b> — give them this password yourself.') + '</div>';
+          renderBrokerAdmin();
+        })
+        .withFailureHandler(bcFailed(btn, 'Add user'))
+        .addPortalUser(brokerId, email);
+    }
+    function removePortalUser(brokerId, email) {
+      if (!confirm('Remove ' + email + ' from the portal? They will no longer be able to sign in.')) return;
+      google.script.run
+        .withSuccessHandler(function (users) {
+          var b = findBroker(brokerId);
+          if (b) b.portalUsers = users;
+          document.getElementById('portalUsers').innerHTML = portalUsersHtml(b || { id: brokerId, portalUsers: users });
+          renderBrokerAdmin();
+          toast(email + ' removed from the portal.', 'ok');
+        })
+        .withFailureHandler(bcFailed())
+        .removePortalUser(email);
     }
 
     function submitBroker(id) {
@@ -3507,7 +3602,7 @@
         })
         .withFailureHandler(bcFailed(btn, 'Save brokerage'))
         .saveBroker({ id: id, name: name, baseRate: rate, contactPerson: document.getElementById('bfPerson').value,
-                      position: document.getElementById('bfPosition').value, contactNumber: document.getElementById('bfNumber').value, accessCode: document.getElementById('bfCode').value,
+                      position: document.getElementById('bfPosition').value, contactNumber: document.getElementById('bfNumber').value,
                       email: email });
     }
 

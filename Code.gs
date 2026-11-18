@@ -104,7 +104,8 @@ var SETTING_DEFS = [
   ['agreements_folder_id', 'Shared Drive folder ID for MOAs and Truck Agreements', '', 'text', 'Blank = each person\'s own Drive'],
   ['team_emails', 'Team (Google accounts that use the app)', '', 'textarea', 'One email per line. Press "Share with team" to give them access to the spreadsheets and Drive folders'],
   ['portal_admin_pct', 'Brokerage portal: admin %', 5, 'number', 'Used for proposals a brokerage generates in the portal'],
-  ['portal_net_pct', 'Brokerage portal: target net income %', 20, 'number', 'Used for proposals a brokerage generates in the portal']
+  ['portal_net_pct', 'Brokerage portal: target net income %', 20, 'number', 'Used for proposals a brokerage generates in the portal'],
+  ['portal_url', 'Brokerage portal link', '', 'text', 'The portal deployment\'s web app URL. Included in the sign-in email sent to new portal users']
 ];
 var SETTINGS_MEMO_ = null;
 
@@ -257,19 +258,143 @@ var BROKER_CALL_ = false;
 function teamOnly_() {
   if (brokerMode_() && !BROKER_CALL_) throw new Error('Not available in the brokerage portal.');
 }
-// The brokerage row for a portal access code, or an error
-function brokerFromAuth_(code) {
-  code = String(code || '').trim();
-  if (!code) throw new Error('Sign in with your brokerage access code.');
-  var rows = readList_(brokersSheet_(), BROKER_HEAD.length);
-  for (var i = 0; i < rows.length; i++) {
-    if (String(rows[i].v[11] || '').trim() && String(rows[i].v[11]).trim() === code) return rows[i];
-  }
-  throw new Error('That access code is not recognised. Ask 2C Trucking for your brokerage access code.');
+// ----- Portal users: email + password, one or more per brokerage -----
+// Tab "Portal Users" in the driver matrix spreadsheet. Passwords are stored as salted SHA-256 hashes.
+// Adding a user (admin) makes a temporary password and emails it; the user sets their own on first sign-in.
+var PORTAL_USERS_TAB = 'Portal Users';
+var PORTAL_USER_HEAD = ['Email', 'Broker ID', 'Password Hash', 'Salt', 'Must Change', 'Created', 'Last Sign-in', 'Added By'];
+var PORTAL_SESSION_SECS = 21600;   // signed-in sessions last 6 hours (CacheService's maximum)
+function portalUsersSheet_() {
+  var sh = getListSheet_(PORTAL_USERS_TAB, PORTAL_USER_HEAD);
+  fillHeaders_(sh, PORTAL_USER_HEAD);
+  return sh;
 }
-// Called by the portal page: signs a brokerage in and returns only its own brokerage, clients and addresses.
-function brokerLogin(code) {
-  return brokerData_(brokerFromAuth_(code));
+function hashPw_(pw, salt) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt + '|' + pw, Utilities.Charset.UTF_8);
+  return Utilities.base64Encode(bytes);
+}
+function randomCode_(n) {
+  var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789', out = '';
+  for (var i = 0; i < n; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
+function normEmail_(e) { return String(e || '').trim().toLowerCase(); }
+function portalUserRow_(email) {
+  email = normEmail_(email);
+  if (!email) return null;
+  var rows = readList_(portalUsersSheet_(), PORTAL_USER_HEAD.length);
+  for (var i = 0; i < rows.length; i++) if (normEmail_(rows[i].v[0]) === email) return rows[i];
+  return null;
+}
+// Admin: adds a portal user to a brokerage (or resets an existing one), emails the temporary password.
+function addPortalUser(brokerId, email) {
+  teamOnly_();
+  return withLock_(function () {
+    email = normEmail_(email);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid email address.');
+    var broker = findRow_(brokersSheet_(), BROKER_HEAD.length, brokerId);
+    if (!broker) throw new Error('Save the brokerage first.');
+    var sh = portalUsersSheet_();
+    var found = portalUserRow_(email);
+    if (found && found.v[1] !== brokerId) throw new Error(email + ' is already a portal user of another brokerage.');
+    var temp = randomCode_(10), salt = randomCode_(16);
+    var now = Utilities.formatDate(new Date(), 'Asia/Manila', 'yyyy-MM-dd HH:mm');
+    var by = Session.getActiveUser().getEmail() || '';
+    var row = [email, brokerId, hashPw_(temp, salt), salt, 'Y', found ? found.v[5] : now, found ? found.v[6] : '', by];
+    if (found) sh.getRange(found.row, 1, 1, row.length).setValues([row]);
+    else sh.appendRow(row);
+    try { CacheService.getScriptCache().remove('pfail_' + email); } catch (e) { /* fine */ }
+    var mailed = sendPortalInvite_(email, temp, broker.v[1], !!found);
+    return { email: email, tempPassword: temp, mailed: mailed, users: portalUsersOf_(brokerId) };
+  });
+}
+function removePortalUser(email) {
+  teamOnly_();
+  return withLock_(function () {
+    var found = portalUserRow_(email);
+    if (found) portalUsersSheet_().deleteRow(found.row);
+    return found ? portalUsersOf_(found.v[1]) : [];
+  });
+}
+function portalUsersOf_(brokerId) {
+  return readList_(portalUsersSheet_(), PORTAL_USER_HEAD.length).filter(function (x) { return x.v[1] === brokerId; })
+    .map(function (x) { return { email: x.v[0], mustChange: x.v[4] === 'Y', created: x.v[5], lastSignIn: x.v[6] }; });
+}
+// The sign-in email, from the admin's own account (the team app runs as the person using it)
+function sendPortalInvite_(email, temp, brokerName, isReset) {
+  var who = signatory_();
+  var url = String(settings_().portal_url || '').trim();
+  var lines = [
+    'Hello,',
+    '',
+    (isReset ? 'Your password for the ' : 'You have been given access to the ') + (who.company || '2C Trucking') + ' brokerage portal for ' + brokerName + (isReset ? ' has been reset.' : '.'),
+    'Use it to price trailer trips for your clients and download the client proposal.',
+    '',
+    'Sign in with:',
+    '  Email: ' + email,
+    '  Temporary password: ' + temp,
+    url ? '  Portal link: ' + url : '  Portal link: (ask ' + (who.company || '2C Trucking') + ' for the link)',
+    '',
+    'You will be asked to choose your own password the first time you sign in.',
+    '',
+    'Regards,',
+    who.company || '2C Trucking'
+  ];
+  try {
+    MailApp.sendEmail({ to: email, subject: (who.company || '2C Trucking') + ' brokerage portal – your sign-in details', body: lines.join('\n'), name: who.company || '2C Trucking' });
+    return true;
+  } catch (e) { console.error('Portal invite not sent to ' + email + ': ' + e.message); return false; }
+}
+// Portal: email + password → a session token the page sends with every later call
+function portalSignIn(email, password) {
+  email = normEmail_(email);
+  password = String(password || '');
+  var cache = CacheService.getScriptCache();
+  var fails = Number(cache.get('pfail_' + email) || 0);
+  if (fails >= 6) throw new Error('Too many failed sign-ins. Try again in 15 minutes or ask 2C Trucking to reset your password.');
+  var u = portalUserRow_(email);
+  if (!u || !password || hashPw_(password, u.v[3]) !== u.v[2]) {
+    cache.put('pfail_' + email, String(fails + 1), 900);
+    throw new Error('Email or password not recognised.');
+  }
+  cache.remove('pfail_' + email);
+  var token = randomCode_(40);
+  cache.put('ptok_' + token, JSON.stringify({ email: email, brokerId: u.v[1] }), PORTAL_SESSION_SECS);
+  portalUsersSheet_().getRange(u.row, 7).setValue(Utilities.formatDate(new Date(), 'Asia/Manila', 'yyyy-MM-dd HH:mm'));
+  var d = brokerData_(findRow_(brokersSheet_(), BROKER_HEAD.length, u.v[1]));
+  d.token = token;
+  d.email = email;
+  d.mustChange = u.v[4] === 'Y';
+  return d;
+}
+// Portal: sets a new password (required on first sign-in)
+function portalChangePassword(token, newPassword) {
+  var s = portalSession_(token);
+  newPassword = String(newPassword || '');
+  if (newPassword.length < 8) throw new Error('Use at least 8 characters.');
+  var u = portalUserRow_(s.email);
+  if (!u) throw new Error('Sign in again.');
+  var salt = randomCode_(16);
+  portalUsersSheet_().getRange(u.row, 3, 1, 3).setValues([[hashPw_(newPassword, salt), salt, 'N']]);
+  return true;
+}
+function portalSession_(token) {
+  var raw = token ? CacheService.getScriptCache().get('ptok_' + String(token)) : null;
+  if (!raw) throw new Error('Your session has ended. Please sign in again.');
+  return JSON.parse(raw);
+}
+// The brokerage row for a portal session token, or an error
+function brokerFromAuth_(token) {
+  var s = portalSession_(token);
+  var row = findRow_(brokersSheet_(), BROKER_HEAD.length, s.brokerId);
+  if (!row) throw new Error('Your brokerage is no longer in the list. Ask 2C Trucking.');
+  return row;
+}
+// Called by the portal page on reload: this brokerage's clients and addresses for a signed-in session.
+function brokerLogin(token) {
+  var d = brokerData_(brokerFromAuth_(token));
+  d.email = portalSession_(token).email;
+  return d;
 }
 // Called by the portal page: a brokerage adds or edits one of its own clients. c: { id?, name, contactNumber, code? }
 function brokerSaveClient(code, c) {
@@ -299,7 +424,7 @@ function brokerData_(row) {
   try {
     var all = getBrokersClients();
     var broker = all.brokers.filter(function (b) { return b.id === row.v[0]; })[0];
-    delete broker.accessCode;
+    delete broker.portalUsers;
     var clients = all.clients.filter(function (c) { return c.brokerId === broker.id; });
     var ids = {};
     clients.forEach(function (c) { ids[c.id] = true; });
@@ -1026,8 +1151,7 @@ var BROKERS_TAB = 'Brokers';
 var CLIENTS_TAB = 'Clients';
 var ADDRESSES_TAB = 'Client Addresses';
 var BROKER_HEAD = ['Broker ID', 'Brokerage', 'Contact Person', 'Contact Number', 'Base Rate (PHP)',
-                   'Position', 'Email', 'MOA File ID', 'MOA File Name', 'Truck Agreement File ID', 'Truck Agreement File Name',
-                   'Access Code'];   // L: brokerage portal sign-in code (blank = no portal access)
+                   'Position', 'Email', 'MOA File ID', 'MOA File Name', 'Truck Agreement File ID', 'Truck Agreement File Name'];
 // Brokerage documents: the column that holds the Drive file ID (the file name is in the next column)
 var BROKER_DOCS = { moa: { col: 8, label: 'MOA' }, truck: { col: 10, label: 'Truck Agreement' } };
 var MAX_DOC_BYTES = 10 * 1024 * 1024;   // 10 MB per uploaded document
@@ -1236,7 +1360,7 @@ function getBrokersClients() {
   var brokers = readList_(brokersSheet_(), BROKER_HEAD.length).map(function (x) {
     return { id: x.v[0], name: x.v[1], contactPerson: x.v[2], contactNumber: x.v[3], baseRate: rateNum_(x.v[4]),
              position: x.v[5], email: x.v[6], moa: fileRef_(x.v[7], x.v[8]), truck: fileRef_(x.v[9], x.v[10]),
-             accessCode: String(x.v[11] || '').trim() };
+             portalUsers: [] };
   });
   var clients = readList_(clientsSheet_(), CLIENT_HEAD.length).map(function (x) {
     return { id: x.v[0], brokerId: x.v[1], name: x.v[2], contactNumber: x.v[3], route: CLIENT_ROUTE, code: x.v[8] };
@@ -1249,6 +1373,13 @@ function getBrokersClients() {
     a.address = composeAddress_(a) || x.v[6];
     return a;
   });
+  if (!BROKER_CALL_) {   // admins see who can sign in to the portal for each brokerage
+    var pu = readList_(portalUsersSheet_(), PORTAL_USER_HEAD.length);
+    brokers.forEach(function (bk) {
+      bk.portalUsers = pu.filter(function (x) { return x.v[1] === bk.id; })
+        .map(function (x) { return { email: x.v[0], mustChange: x.v[4] === 'Y', created: x.v[5], lastSignIn: x.v[6] }; });
+    });
+  }
   var byName = function (a, b) { return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1; };
   brokers.sort(byName);
   clients.sort(byName);
@@ -1276,20 +1407,10 @@ function saveBroker(b) {
     if (dupe.length) throw new Error('There is already a brokerage named ' + name + '.');
     var found = findRow_(sh, BROKER_HEAD.length, b.id);
     if (b.id && !found) throw new Error('That brokerage was not found. It may have been removed.');
-    var code = String(b.accessCode === undefined || b.accessCode === null ? '' : b.accessCode).replace(/\s+/g, '').slice(0, 40);
-    if (code && code.length < 6) throw new Error('The portal access code must be at least 6 characters, or blank for no portal access.');
-    if (code) {
-      var taken = readList_(sh, BROKER_HEAD.length).filter(function (x) { return String(x.v[11] || '').trim() === code && x.v[0] !== b.id; });
-      if (taken.length) throw new Error('Another brokerage already uses that access code. Choose a different one.');
-    }
     var row = [b.id || newId_('BR-'), name, clean_(b.contactPerson), clean_(b.contactNumber, 40), base,
                clean_(b.position), email];
-    if (found) {
-      sh.getRange(found.row, 1, 1, row.length).setValues([row]);
-      sh.getRange(found.row, 12).setValue(code);
-    } else {
-      sh.appendRow(row.concat(['', '', '', '', code]));
-    }
+    if (found) sh.getRange(found.row, 1, 1, row.length).setValues([row]);
+    else sh.appendRow(row.concat(['', '', '', '']));
     return getBrokersClients();
   });
 }

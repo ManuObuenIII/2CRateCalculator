@@ -51,11 +51,14 @@ A second deployment of the same code lets a brokerage price trips for its own cl
 proposal only (no internal cost sheet, settings, saved proposals or other brokerages):
 
 1. **Deploy → New deployment → Web app**, *Execute as:* **Me**, *Who has access:* **Anyone**. Give that URL to brokerages.
-2. In the team app, open **Brokerages & clients → Edit** a brokerage and set its **Portal access code** (or press
-   Generate). Blank = no portal access.
-3. The brokerage opens the portal link and signs in with the code. It can add its own clients and delivery
-   addresses there. The proposal uses the portal admin % and target
-   net income % from Settings. Everything else the script offers (`teamOnly_()`) refuses calls from the portal.
+2. In Settings, paste that URL into **Brokerage portal link** (it goes into the sign-in email).
+3. In the team app, open **Brokerages & clients → Edit** a brokerage and, under **Brokerage portal users**, add the
+   person's email. A temporary password is created, stored as a salted SHA-256 hash in the **Portal Users** tab, and
+   emailed to them with the portal link (from the admin's own account). Reset password / Remove are there too.
+4. The person opens the portal link, signs in with email + temporary password, and is asked to choose their own
+   password. Sessions last 6 hours; 6 wrong passwords lock the email for 15 minutes. They can add their own clients and
+   delivery addresses. The proposal uses the portal admin % and target net income % from Settings. Everything else the
+   script offers (`teamOnly_()`) refuses calls from the portal.
 
 ## Notes
 
