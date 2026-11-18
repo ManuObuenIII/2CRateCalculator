@@ -269,7 +269,32 @@ function brokerFromAuth_(code) {
 }
 // Called by the portal page: signs a brokerage in and returns only its own brokerage, clients and addresses.
 function brokerLogin(code) {
+  return brokerData_(brokerFromAuth_(code));
+}
+// Called by the portal page: a brokerage adds or edits one of its own clients. c: { id?, name, contactNumber, code? }
+function brokerSaveClient(code, c) {
   var row = brokerFromAuth_(code);
+  c = c || {};
+  if (c.id) brokerOwnsClient_(row.v[0], c.id);
+  c.brokerId = row.v[0];
+  BROKER_CALL_ = true;
+  try { saveClient(c); } finally { BROKER_CALL_ = false; }
+  return brokerData_(row);
+}
+// Called by the portal page: a brokerage adds or edits a delivery address of one of its own clients.
+function brokerSaveAddress(code, a) {
+  var row = brokerFromAuth_(code);
+  a = a || {};
+  brokerOwnsClient_(row.v[0], a.clientId);
+  BROKER_CALL_ = true;
+  try { saveAddress(a); } finally { BROKER_CALL_ = false; }
+  return brokerData_(row);
+}
+function brokerOwnsClient_(brokerId, clientId) {
+  var found = findRow_(clientsSheet_(), CLIENT_HEAD.length, clientId);
+  if (!found || found.v[1] !== brokerId) throw new Error('Choose one of your own clients.');
+}
+function brokerData_(row) {
   BROKER_CALL_ = true;
   try {
     var all = getBrokersClients();

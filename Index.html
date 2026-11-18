@@ -937,9 +937,18 @@
     body.portal #routeFieldset, body.portal #costsFieldset, body.portal #bcAdminLink, body.portal .encl-box .check.off { display: none !important; }
     body.portal .encl-box:not(:has(.check:not(.off))) { display: none !important; }
     body.portal .masthead > div:not(.brand-plate) { display: block; }
+    @media (max-width: 639px) {
+      body.portal .masthead { flex-direction: column; gap: 10px; }
+      body.portal .masthead h1, body.portal .masthead p { display: none; }
+      body.portal .masthead > div:not(.brand-plate) { width: 100%; }
+      body.portal .portal-chip { display: flex; width: 100%; margin-top: 0; justify-content: space-between; }
+      body.portal .portal-chip b { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    }
     .portal-chip { display: inline-flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 12px; border-radius: 999px; font-size: 12.5px;
       background: var(--red-tint); color: var(--ink); border: 1px solid rgba(217, 49, 38, 0.18); }
     .portal-chip b { color: var(--red); }
+    .portal-only { display: inline-block; margin-top: 8px; font-size: 12.5px; }
+    #portalFormHost .bc-form { margin: 0; box-shadow: none; background: transparent; padding: 0; }
     .portal-chip button { border: 0; background: none; padding: 0; color: var(--mist); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; width: auto; min-height: 0; box-shadow: none; }
     #portalLogin .modal-bg { cursor: default; }
     .receipt-row.total:not(.warn) > span:last-child {
@@ -1424,7 +1433,7 @@
       <div>
         <h1>2C <em>Calculator</em></h1>
         <p id="mastLead">Price a trailer trip from Manila Port, then send the client proposal or keep the full cost sheet.</p>
-        <div class="portal-chip" id="portalChip" hidden>Brokerage portal · <b id="portalName"></b><button type="button" onclick="portalSignOut()">Sign out</button></div>
+        <div class="portal-chip" id="portalChip" hidden><span>Portal</span><b id="portalName"></b><button type="button" onclick="portalSignOut()">Sign out</button></div>
       </div>
     </header>
 
@@ -1465,12 +1474,14 @@
               <select id="clientSel" required disabled onchange="onClientChange()">
                 <option value="">Choose the brokerage first</option>
               </select>
+              <a href="#" class="toll-lookup portal-only" id="portalAddClient" hidden onclick="portalNewClient(); return false;">+ Add a client</a>
             </div>
             <div class="form-group">
               <label for="addrSel">Delivery address (destination)</label>
               <select id="addrSel" required disabled onchange="onAddressChange()">
                 <option value="">Choose the client first</option>
               </select>
+              <a href="#" class="toll-lookup portal-only" id="portalAddAddr" hidden onclick="portalNewAddress(); return false;">+ Add a delivery address</a>
               <div class="client-addr" id="clientAddr" hidden></div>
               <div class="hint">All trips start from Manila Port.
                 <a href="#" class="toll-lookup" id="bcAdminLink" onclick="openBrokersAdmin(); return false;">Add or edit brokerages and clients</a></div>
@@ -1781,6 +1792,12 @@
         <button type="button" class="btn-red" id="csvGo" onclick="downloadCsv()">Download CSV</button>
       </div>
     </div>
+  </div>
+
+  <!-- Brokerage portal: the client and address forms open here (they normally live in the Brokerages & clients tab) -->
+  <div class="modal" id="portalFormModal" hidden role="dialog" aria-modal="true">
+    <div class="modal-bg" onclick="portalCloseForms()"></div>
+    <div class="modal-panel glass" id="portalFormHost"></div>
   </div>
 
   <!-- Brokerage portal sign-in -->
@@ -3007,10 +3024,14 @@
           fillBrokerSelect();
           var b = BC.brokers[0];
           if (b) {
+            selBrokerId = b.id;
             var sel = document.getElementById('brokerSel');
             sel.innerHTML = option(b.id, b.name, true);
             sel.disabled = true;
             fillClientSelect();
+            portalFormsSetup();
+            document.getElementById('portalAddClient').hidden = false;
+            document.getElementById('portalAddAddr').hidden = false;
             document.getElementById('portalName').innerText = b.name;
             document.getElementById('portalChip').hidden = false;
             document.getElementById('mastLead').innerText = 'Price a trailer trip from Manila Port for one of your clients and download the client proposal.';
@@ -3044,6 +3065,57 @@
       busy(document.getElementById('plGo'), 'Signing in…');
       portalLoad();
     }
+    // The client and address forms are moved into a modal, since the Brokerages & clients tab is hidden in the portal
+    var portalFormsReady = false;
+    function portalFormsSetup() {
+      if (portalFormsReady) return;
+      portalFormsReady = true;
+      var host = document.getElementById('portalFormHost');
+      ['clientForm', 'addrForm'].forEach(function (id) {
+        var f = document.getElementById(id);
+        host.appendChild(f);
+        new MutationObserver(function () {   // Cancel / Save hide the form: close the modal with it
+          if (document.getElementById('clientForm').hidden && document.getElementById('addrForm').hidden) portalCloseForms();
+        }).observe(f, { attributes: true, attributeFilter: ['hidden'] });
+      });
+    }
+    function portalOpenForms() {
+      document.getElementById('portalFormModal').hidden = false;
+      document.body.style.overflow = 'hidden';
+    }
+    function portalCloseForms() {
+      var modal = document.getElementById('portalFormModal');
+      if (modal.hidden) return;
+      ['clientForm', 'addrForm'].forEach(function (id) { var f = document.getElementById(id); if (!f.hidden) f.hidden = true; });
+      modal.hidden = true;
+      document.body.style.overflow = '';
+    }
+    function portalNewClient() {
+      portalOpenForms();
+      editClient('');
+    }
+    function portalNewAddress() {
+      var c = currentClient();
+      if (!c) { toastError('Choose the client first.'); return; }
+      selClientId = c.id;
+      portalOpenForms();
+      editAddress('');
+    }
+    // After a save in the portal, pick the new client / address in the calculator
+    function portalPick(d, kind, match) {
+      var added = (d[kind] || []).filter(match)[0];
+      if (!added) return;
+      if (kind === 'clients') {
+        document.getElementById('clientSel').value = added.id;
+        onClientChange();
+      } else {
+        document.getElementById('clientSel').value = added.clientId;
+        fillAddressSelect();
+        document.getElementById('addrSel').value = added.id;
+        onAddressChange();
+      }
+    }
+
     function portalSignOut() {
       PORTAL_CODE = '';
       try { localStorage.removeItem('2c_portal_code'); } catch (e) { /* fine */ }
@@ -3486,10 +3558,12 @@
           }
           bcSaved(d);
           toast(name + ' saved.', 'ok');
+          if (PORTAL) portalPick(d, 'clients', function (c) { return c.name.toLowerCase() === name.replace(/\s+/g, ' ').toLowerCase(); });
         })
         .withFailureHandler(bcFailed(btn, 'Save client'))
-        .saveClient({ id: id, brokerId: selBrokerId, name: name, contactNumber: document.getElementById('clNumber').value,
-                      code: document.getElementById('clCode').value });
+        [PORTAL ? 'brokerSaveClient' : 'saveClient'].apply(null, (PORTAL ? [PORTAL_CODE] : []).concat([
+          { id: id, brokerId: selBrokerId, name: name, contactNumber: document.getElementById('clNumber').value,
+            code: document.getElementById('clCode').value }]));
     }
 
     function removeClient(id) {
@@ -3625,7 +3699,7 @@
             idle(btn, 'Save address');
             toastError('The server is not answering. Check your connection, then try Save address again.');
           })
-          .getBrokersClients();
+          [PORTAL ? 'brokerLogin' : 'getBrokersClients'](PORTAL ? PORTAL_CODE : undefined);
       }, 40000);
       google.script.run
         .withSuccessHandler(function (d) {
@@ -3634,13 +3708,15 @@
           document.getElementById('addrForm').hidden = true;
           bcSaved(d);
           toast('Address saved.', 'ok');
+          if (PORTAL) portalPick(d, 'addresses', function (x) { return x.clientId === clientId && x.cityCode === cityCode && (x.barangay || '') === brgy && String(x.line || '').toLowerCase() === line.toLowerCase(); });
         })
         .withFailureHandler(function (error) {
           if (done) return;
           finish();
           bcFailed(btn, 'Save address')(error);
         })
-        .saveAddress({ id: id, clientId: clientId, cityCode: cityCode, barangay: brgy, line: line });
+        [PORTAL ? 'brokerSaveAddress' : 'saveAddress'].apply(null, (PORTAL ? [PORTAL_CODE] : []).concat([
+          { id: id, clientId: clientId, cityCode: cityCode, barangay: brgy, line: line }]));
     }
 
     function removeAddress(id) {

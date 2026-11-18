@@ -53,7 +53,8 @@ proposal only (no internal cost sheet, settings, saved proposals or other broker
 1. **Deploy → New deployment → Web app**, *Execute as:* **Me**, *Who has access:* **Anyone**. Give that URL to brokerages.
 2. In the team app, open **Brokerages & clients → Edit** a brokerage and set its **Portal access code** (or press
    Generate). Blank = no portal access.
-3. The brokerage opens the portal link and signs in with the code. The proposal uses the portal admin % and target
+3. The brokerage opens the portal link and signs in with the code. It can add its own clients and delivery
+   addresses there. The proposal uses the portal admin % and target
    net income % from Settings. Everything else the script offers (`teamOnly_()`) refuses calls from the portal.
 
 ## Notes
