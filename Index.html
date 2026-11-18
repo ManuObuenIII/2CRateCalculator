@@ -931,6 +931,17 @@
     }
     .masthead h1 em { font-style: italic; color: var(--red); }
     .masthead p { max-width: 60ch; }
+    /* Brokerage portal: only the calculator and the client proposal */
+    body.portal .app-tabs, body.portal #viewToggle, body.portal .proposal-type-label, body.portal #viewHint,
+    body.portal #saveBtn, body.portal #emailBtn, body.portal #saveHint, body.portal #marginsRow, body.portal #revisionNote,
+    body.portal #routeFieldset, body.portal #costsFieldset, body.portal #bcAdminLink, body.portal .encl-box .check.off { display: none !important; }
+    body.portal .encl-box:not(:has(.check:not(.off))) { display: none !important; }
+    body.portal .masthead > div:not(.brand-plate) { display: block; }
+    .portal-chip { display: inline-flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 12px; border-radius: 999px; font-size: 12.5px;
+      background: var(--red-tint); color: var(--ink); border: 1px solid rgba(217, 49, 38, 0.18); }
+    .portal-chip b { color: var(--red); }
+    .portal-chip button { border: 0; background: none; padding: 0; color: var(--mist); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; width: auto; min-height: 0; box-shadow: none; }
+    #portalLogin .modal-bg { cursor: default; }
     .receipt-row.total:not(.warn) > span:last-child {
       background: linear-gradient(90deg, #B4261D 0%, #D93126 55%, #F0654F 100%);
       -webkit-background-clip: text;
@@ -1412,7 +1423,8 @@
       <div hidden><?!= include('Signature'); ?></div>
       <div>
         <h1>2C <em>Calculator</em></h1>
-        <p>Price a trailer trip from Manila Port, then send the client proposal or keep the full cost sheet.</p>
+        <p id="mastLead">Price a trailer trip from Manila Port, then send the client proposal or keep the full cost sheet.</p>
+        <div class="portal-chip" id="portalChip" hidden>Brokerage portal · <b id="portalName"></b><button type="button" onclick="portalSignOut()">Sign out</button></div>
       </div>
     </header>
 
@@ -1461,11 +1473,11 @@
               </select>
               <div class="client-addr" id="clientAddr" hidden></div>
               <div class="hint">All trips start from Manila Port.
-                <a href="#" class="toll-lookup" onclick="openBrokersAdmin(); return false;">Add or edit brokerages and clients</a></div>
+                <a href="#" class="toll-lookup" id="bcAdminLink" onclick="openBrokersAdmin(); return false;">Add or edit brokerages and clients</a></div>
             </div>
           </fieldset>
 
-          <fieldset class="glass card">
+          <fieldset class="glass card" id="routeFieldset">
             <legend><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 21s-6-5.3-6-11a6 6 0 0 1 12 0c0 5.7-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/></svg></span>Route</legend>
             <div class="form-group">
               <label>Direction from Manila</label>
@@ -1484,7 +1496,7 @@
             <div class="auto-note" id="fuelNote">Loading this week's diesel price…</div>
           </fieldset>
 
-          <fieldset class="glass card">
+          <fieldset class="glass card" id="costsFieldset">
             <legend><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-2-1.5L14 21l-2-1.5L10 21l-2-1.5L6 21z"/><path d="M9 8h6M9 12h6"/></svg></span>Trip costs</legend>
             <div class="auto-note">The driver rate comes from the driver rate matrix. Fuel efficiency comes from the Masterlist; maintenance (fixed + per km) from Settings. Both are matched to the one-way distance.</div>
             <div class="toll-block">
@@ -1512,7 +1524,7 @@
 
           <fieldset class="glass card">
             <legend><span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M19 5L5 19"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg></span>Margins and tax</legend>
-            <div class="row">
+            <div class="row" id="marginsRow">
               <div class="col form-group">
                 <label for="adminPct">Admin %</label>
                 <input type="number" id="adminPct" step="0.1" min="0" value="5" required>
@@ -1771,6 +1783,23 @@
     </div>
   </div>
 
+  <!-- Brokerage portal sign-in -->
+  <div class="modal" id="portalLogin" hidden role="dialog" aria-modal="true" aria-labelledby="plTitle">
+    <div class="modal-bg"></div>
+    <div class="modal-panel glass">
+      <h3 id="plTitle">Brokerage sign-in</h3>
+      <p class="modal-sub">Enter the access code 2C Trucking gave your brokerage. You can then price trips for your clients and download the client proposal.</p>
+      <div class="form-group">
+        <label for="plCode">Access code</label>
+        <input type="text" id="plCode" maxlength="40" autocomplete="off" autocapitalize="characters" placeholder="e.g. ONECRYSTAL-2026">
+      </div>
+      <div class="hint" id="plHint"></div>
+      <div class="form-actions">
+        <button type="button" class="btn-red" id="plGo" onclick="portalSignIn()">Sign in</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Email the client proposal to the brokerage -->
   <div class="modal" id="emailModal" hidden role="dialog" aria-modal="true" aria-labelledby="emTitle">
     <div class="modal-bg" onclick="closeEmail()"></div>
@@ -1845,8 +1874,14 @@
 
   <script>
     // Two proposal viewers: the calculator's result, and a saved proposal opened from the Proposals tab
+    // Brokerage portal (the second deployment, run as the owner): set by the server when the page is built
+    var PORTAL = <?!= brokerMode ? 'true' : 'false' ?>;
+    var PORTAL_CODE = '';
+    try { PORTAL_CODE = PORTAL ? (localStorage.getItem('2c_portal_code') || '') : ''; } catch (e) { /* storage off */ }
+    if (PORTAL) document.body.className += ' portal';
+
     var viewers = {
-      calc:  { record: null, view: 'internal', box: 'resultBox', toggle: 'viewToggle', btnI: 'btnInternal', btnE: 'btnExternal', hint: 'viewHint', pdf: 'pdfBtn', drive: 'calcDriveLink', encl: 'calcEncl', email: 'emailBtn', revise: 'reviseBtn', del: 'deleteBtn' },
+      calc:  { record: null, view: PORTAL ? 'external' : 'internal', box: 'resultBox', toggle: 'viewToggle', btnI: 'btnInternal', btnE: 'btnExternal', hint: 'viewHint', pdf: 'pdfBtn', drive: 'calcDriveLink', encl: 'calcEncl', email: 'emailBtn', revise: 'reviseBtn', del: 'deleteBtn' },
       saved: { record: null, view: 'internal', box: 'savedBox', toggle: 'savedToggle', btnI: 'savedBtnInternal', btnE: 'savedBtnExternal', hint: 'savedHint', pdf: 'savedPdfBtn', drive: 'savedDriveLink', encl: 'savedEncl', email: 'savedEmailBtn', revise: 'savedReviseBtn', dispatch: 'savedDispatchBtn', del: 'savedDeleteBtn' }
     };
 
@@ -2942,6 +2977,7 @@
     var BRGY_CACHE = {};
 
     function loadBrokersClients(after) {
+      if (PORTAL) { portalLoad(after); return; }
       google.script.run
         .withSuccessHandler(function (d) {
           bcData(d);
@@ -2959,6 +2995,61 @@
         })
         .getBrokersClients();
     }
+
+    // ----- brokerage portal: sign in with the access code, then only this brokerage's clients are shown -----
+    function portalLoad(after) {
+      if (!PORTAL_CODE) { portalAsk(''); return; }
+      document.getElementById('brokerSel').innerHTML = option('', 'Signing in…', true);
+      google.script.run
+        .withSuccessHandler(function (d) {
+          bcData(d);
+          bcLoaded = true;
+          fillBrokerSelect();
+          var b = BC.brokers[0];
+          if (b) {
+            var sel = document.getElementById('brokerSel');
+            sel.innerHTML = option(b.id, b.name, true);
+            sel.disabled = true;
+            fillClientSelect();
+            document.getElementById('portalName').innerText = b.name;
+            document.getElementById('portalChip').hidden = false;
+            document.getElementById('mastLead').innerText = 'Price a trailer trip from Manila Port for one of your clients and download the client proposal.';
+          }
+          document.getElementById('portalLogin').hidden = true;
+          document.body.style.overflow = '';
+          if (after) after();
+        })
+        .withFailureHandler(function (error) {
+          PORTAL_CODE = '';
+          try { localStorage.removeItem('2c_portal_code'); } catch (e) { /* fine */ }
+          portalAsk(error.message);
+        })
+        .brokerLogin(PORTAL_CODE);
+    }
+    function portalAsk(msg) {
+      document.getElementById('brokerSel').innerHTML = option('', 'Sign in to see your clients', true);
+      var hint = document.getElementById('plHint');
+      hint.className = 'hint' + (msg ? ' warn' : '');
+      hint.innerText = msg || '';
+      idle(document.getElementById('plGo'), 'Sign in');
+      document.getElementById('portalLogin').hidden = false;
+      document.body.style.overflow = 'hidden';
+      setTimeout(function () { document.getElementById('plCode').focus(); }, 50);
+    }
+    function portalSignIn() {
+      var code = document.getElementById('plCode').value.replace(/\s+/g, '');
+      if (!code) { portalAsk('Enter your access code.'); return; }
+      PORTAL_CODE = code;
+      try { localStorage.setItem('2c_portal_code', code); } catch (e) { /* kept for this visit only */ }
+      busy(document.getElementById('plGo'), 'Signing in…');
+      portalLoad();
+    }
+    function portalSignOut() {
+      PORTAL_CODE = '';
+      try { localStorage.removeItem('2c_portal_code'); } catch (e) { /* fine */ }
+      location.reload();
+    }
+    document.getElementById('plCode').addEventListener('keydown', function (e) { if (e.key === 'Enter') portalSignIn(); });
 
     // Takes fresh data from the server and keeps the admin selection valid
     var serverWarned = false;
@@ -3148,8 +3239,8 @@
       setList('brokerList', BC.brokers.length ? BC.brokers.map(function (b) {
         var n = clientsOf(b.id).length;
         var who = [b.contactPerson, b.position].filter(Boolean).map(esc).join(', ');
-        var sub = ['Base rate ' + (b.baseRate ? fmt(b.baseRate) : fmt(STANDARD_BASE_RATE) + ' (standard)'), who, esc(b.contactNumber), esc(b.email)]
-          .filter(Boolean).join(' · ');
+        var sub = ['Base rate ' + (b.baseRate ? fmt(b.baseRate) : fmt(STANDARD_BASE_RATE) + ' (standard)'), who, esc(b.contactNumber), esc(b.email),
+                   b.accessCode ? 'Portal code ' + esc(b.accessCode) : 'No portal access'].filter(Boolean).join(' · ');
         sub += '<br>' + ENCLOSURES.map(function (d) {
           var f = b[d[0]], short = d[0] === 'moa' ? 'MOA' : d[1];
           return f && f.id ? '<span class="doc-tag ok">' + short + ' uploaded</span>' : '<span class="doc-tag no">No ' + short + '</span>';
@@ -3238,6 +3329,11 @@
         + '<div class="col form-group"><label for="bfEmail">Email address</label>'
         + '<input type="email" id="bfEmail" maxlength="120" value="' + esc(b.email) + '" placeholder="e.g. name@company.com"></div></div>'
         + '<div class="hint">The contact person, position and email appear under the brokerage name on the proposal.</div>'
+        + '<div class="form-sub">Brokerage portal</div>'
+        + '<div class="form-group"><label for="bfCode">Portal access code</label>'
+        + '<div class="row"><div class="col"><input type="text" id="bfCode" maxlength="40" autocomplete="off" value="' + esc(b.accessCode || '') + '" placeholder="Blank = no portal access"></div>'
+        + '<div class="col" style="flex:0 0 auto"><button type="button" class="btn-glass" style="width:auto" onclick="document.getElementById(\'bfCode\').value = makeAccessCode(document.getElementById(\'bfName\').value)">Generate</button></div></div>'
+        + '<div class="hint">Give this code to the brokerage. With it they can sign in to the brokerage portal link and generate client proposals for their own clients only.</div></div>'
         + '<div class="form-sub">Documents (PDF, up to 10 MB each)</div>'
         + '<div id="brokerDocs">' + (id ? brokerDocsHtml(b)
             : '<div class="hint">Save the brokerage first, then upload its MOA and Truck Agreement here.</div>') + '</div>'
@@ -3302,6 +3398,14 @@
         .removeBrokerFile(brokerId, kind);
     }
 
+    // "ONECRYSTAL-7K3M": the brokerage name's first letters plus 4 random characters
+    function makeAccessCode(name) {
+      var base = String(name || 'BROKER').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) || 'BROKER';
+      var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', tail = '';
+      for (var i = 0; i < 4; i++) tail += chars[Math.floor(Math.random() * chars.length)];
+      return base + '-' + tail;
+    }
+
     function submitBroker(id) {
       var name = document.getElementById('bfName').value.trim();
       var rate = document.getElementById('bfRate').value.trim();
@@ -3331,7 +3435,7 @@
         })
         .withFailureHandler(bcFailed(btn, 'Save brokerage'))
         .saveBroker({ id: id, name: name, baseRate: rate, contactPerson: document.getElementById('bfPerson').value,
-                      position: document.getElementById('bfPosition').value, contactNumber: document.getElementById('bfNumber').value,
+                      position: document.getElementById('bfPosition').value, contactNumber: document.getElementById('bfNumber').value, accessCode: document.getElementById('bfCode').value,
                       email: email });
     }
 
@@ -3909,6 +4013,7 @@
       document.getElementById('saveHint').style.display = 'none';
 
       var formData = {
+        brokerAuth: PORTAL_CODE,
         companyName: broker.name,
         brokerId: broker.id,
         brokerContact: broker.contactPerson || '',
@@ -4092,7 +4197,7 @@
         })
         .withFailureHandler(fail)
         .renderProposalPdf(buildExternal(rec, true), { brokerId: rec.brokerId || '', includeMoa: kinds.indexOf('moa') >= 0,
-                                                         includeTruck: kinds.indexOf('truck') >= 0, newId: false });
+                                                         includeTruck: kinds.indexOf('truck') >= 0, newId: false, brokerAuth: PORTAL_CODE });
     }
 
     // ---------- save proposal ----------

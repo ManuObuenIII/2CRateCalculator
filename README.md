@@ -45,6 +45,17 @@ Set in `Code.gs`:
    and the Drive folders: open the app as the owner, go to **Settings → Team**, list their Google
    accounts and press **Share with team**.
 
+## Brokerage portal
+
+A second deployment of the same code lets a brokerage price trips for its own clients and download the client
+proposal only (no internal cost sheet, settings, saved proposals or other brokerages):
+
+1. **Deploy → New deployment → Web app**, *Execute as:* **Me**, *Who has access:* **Anyone**. Give that URL to brokerages.
+2. In the team app, open **Brokerages & clients → Edit** a brokerage and set its **Portal access code** (or press
+   Generate). Blank = no portal access.
+3. The brokerage opens the portal link and signs in with the code. The proposal uses the portal admin % and target
+   net income % from Settings. Everything else the script offers (`teamOnly_()`) refuses calls from the portal.
+
 ## Notes
 
 - Route rules for trailers: southbound via the NLEX Connector (C-3 → Magsaysay); northbound via

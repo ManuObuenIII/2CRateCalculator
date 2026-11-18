@@ -102,7 +102,9 @@ var SETTING_DEFS = [
   ['terms', 'Terms and conditions', DEFAULT_TERMS, 'textarea', 'Printed on the client proposal, one term per line'],
   ['proposal_folder_id', 'Shared Drive folder ID for proposal PDFs', '', 'text', 'Blank = each person\'s own Drive'],
   ['agreements_folder_id', 'Shared Drive folder ID for MOAs and Truck Agreements', '', 'text', 'Blank = each person\'s own Drive'],
-  ['team_emails', 'Team (Google accounts that use the app)', '', 'textarea', 'One email per line. Press "Share with team" to give them access to the spreadsheets and Drive folders']
+  ['team_emails', 'Team (Google accounts that use the app)', '', 'textarea', 'One email per line. Press "Share with team" to give them access to the spreadsheets and Drive folders'],
+  ['portal_admin_pct', 'Brokerage portal: admin %', 5, 'number', 'Used for proposals a brokerage generates in the portal'],
+  ['portal_net_pct', 'Brokerage portal: target net income %', 20, 'number', 'Used for proposals a brokerage generates in the portal']
 ];
 var SETTINGS_MEMO_ = null;
 
@@ -184,6 +186,12 @@ function termsList_() {
 // Called by the app's Settings tab: every setting with its label, type and notes.
 function getSettings() {
   var s = settings_();
+  if (brokerMode_() && !BROKER_CALL_) {
+    // The portal only needs what prints on the client proposal
+    var keep = ['company_name', 'signatory_name', 'signatory_title', 'covered_km', 'vat_rate', 'validity_days', 'terms'];
+    return { items: SETTING_DEFS.filter(function (d) { return keep.indexOf(d[0]) >= 0; })
+      .map(function (d) { return { key: d[0], label: d[1], type: d[3], notes: d[4], value: s[d[0]] }; }), url: '', user: '' };
+  }
   return {
     items: SETTING_DEFS.map(function (d) { return { key: d[0], label: d[1], type: d[3], notes: d[4], value: s[d[0]] }; }),
     url: 'https://docs.google.com/spreadsheets/d/' + DRIVER_MATRIX_ID + '/edit#gid=' + getSettingsSheet_().getSheetId(),
@@ -193,6 +201,7 @@ function getSettings() {
 
 // values: { key: value }. Numbers are checked; everything else is saved as typed.
 function saveSettings(values) {
+  teamOnly_();
   values = values || {};
   var sh = getSettingsSheet_();
   settings_();   // makes sure every row exists
@@ -219,14 +228,78 @@ function saveSettings(values) {
   return getSettings();
 }
 
-function doGet() {
-  return HtmlService.createTemplateFromFile('Index')
-    .evaluate()
+// Two deployments of the same code:
+//   Team app       – Execute as: User accessing, Who has access: Anyone with a Google account. The full app.
+//   Brokerage portal – Execute as: Me, Who has access: Anyone. Brokerages sign in with an access code
+//                    (set per brokerage in Brokerages & clients) and can only generate the client proposal.
+function doGet(e) {
+  var t = HtmlService.createTemplateFromFile('Index');
+  t.brokerMode = brokerMode_() || !!(e && e.parameter && e.parameter.portal === 'broker');
+  return t.evaluate()
     .setTitle('2C Calculator · 2C Trucking')
     .setFaviconUrl(FAVICON_URL)
     // Lets the GitHub Pages app (manuobueniii.github.io/2CRateCalculator) show the calculator inside its own window
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+// ---------- Brokerage portal ----------
+// In the portal deployment the script runs as the owner, so the person using it is not the effective user.
+function brokerMode_() {
+  try {
+    var active = String(Session.getActiveUser().getEmail() || '').toLowerCase();
+    var eff = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+    return !active || active !== eff;
+  } catch (err) { return true; }
+}
+// Guard on everything a brokerage must not reach (settings, masterlist, saved proposals, other brokerages…)
+var BROKER_CALL_ = false;
+function teamOnly_() {
+  if (brokerMode_() && !BROKER_CALL_) throw new Error('Not available in the brokerage portal.');
+}
+// The brokerage row for a portal access code, or an error
+function brokerFromAuth_(code) {
+  code = String(code || '').trim();
+  if (!code) throw new Error('Sign in with your brokerage access code.');
+  var rows = readList_(brokersSheet_(), BROKER_HEAD.length);
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i].v[11] || '').trim() && String(rows[i].v[11]).trim() === code) return rows[i];
+  }
+  throw new Error('That access code is not recognised. Ask 2C Trucking for your brokerage access code.');
+}
+// Called by the portal page: signs a brokerage in and returns only its own brokerage, clients and addresses.
+function brokerLogin(code) {
+  var row = brokerFromAuth_(code);
+  BROKER_CALL_ = true;
+  try {
+    var all = getBrokersClients();
+    var broker = all.brokers.filter(function (b) { return b.id === row.v[0]; })[0];
+    delete broker.accessCode;
+    var clients = all.clients.filter(function (c) { return c.brokerId === broker.id; });
+    var ids = {};
+    clients.forEach(function (c) { ids[c.id] = true; });
+    return { brokers: [broker], clients: clients, addresses: all.addresses.filter(function (a) { return ids[a.clientId]; }),
+             standardBaseRate: all.standardBaseRate, coveredKm: all.coveredKm, clientRoute: all.clientRoute };
+  } finally { BROKER_CALL_ = false; }
+}
+// What a brokerage may see of a calculation: the client proposal only (no costs, margins or route review)
+var BROKER_KEEP_ = ['truckType', 'pricingModel', 'validityDays', 'validUntil', 'terms', 'signatory', 'vatRate', 'status', 'source',
+  'distance', 'podKm', 'distanceSource', 'routeVia', 'routeMap', 'mapImage', 'mapImageWide', 'fuelPrice', 'fuelPriceDate',
+  'rateCard', 'grossRate', 'taxType', 'taxAmount', 'finalRate', 'preparedBy', 'discount', 'adjustment', 'cardRate', 'metroCorridor', 'tollDirection'];
+function forBroker_(res, brokerName) {
+  var out = {};
+  BROKER_KEEP_.forEach(function (k) { if (res[k] !== undefined) out[k] = res[k]; });
+  // A target-income top-up is folded into the basic rate, as on the client proposal
+  if (out.adjustment > 0 && out.rateCard) {
+    out.rateCard = JSON.parse(JSON.stringify(out.rateCard));
+    out.rateCard.baseRate += out.adjustment;
+    out.rateCard.total = out.grossRate;
+    out.cardRate = out.grossRate;
+    out.adjustment = 0;
+  }
+  out.preparedBy = brokerName + ' (brokerage portal)';
+  out.brokerPortal = true;
+  return out;
 }
 
 // Pulls another HTML file (e.g. Logo.html) into Index.html
@@ -235,6 +308,24 @@ function include(name) {
 }
 
 function calculateRateFromWeb(data) {
+  if (brokerMode_()) return calculateForBroker_(data);
+  return calculate_(data);
+}
+function calculateForBroker_(data) {
+  var row = brokerFromAuth_(data && data.brokerAuth);
+  BROKER_CALL_ = true;
+  try {
+    var d = {};
+    for (var k in data) d[k] = data[k];
+    d.brokerId = row.v[0];
+    d.adminPct = settingNum_('portal_admin_pct', 5);
+    d.incomePct = settingNum_('portal_net_pct', 20);
+    d.additionalExpenses = 0;
+    d.distanceOverride = '';
+    return forBroker_(calculate_(d), row.v[1]);
+  } finally { BROKER_CALL_ = false; }
+}
+function calculate_(data) {
   var source = ORIGIN;
   var dest = data.destination;
   var taxType = data.taxType;
@@ -515,6 +606,7 @@ function getMasterlistBracket_(km) {
 
 // Called by the app's Masterlist tab.
 function getMasterlist() {
+  teamOnly_();
   return {
     rows: readMasterlist_(),
     coveredKm: rateCard_().coveredKm,
@@ -533,6 +625,7 @@ function masterCell_(v, name) {
 // Max Km blank = "and above" (last bracket only). Brackets must follow on with no gaps or overlaps.
 // Everything is checked before anything is written; then the sheet's bracket rows are replaced.
 function saveMasterlist(rows) {
+  teamOnly_();
   var list = (rows || []).map(function (r) {
     var min = Number(r.minKm);
     var max = r.maxKm === '' || r.maxKm === null || r.maxKm === undefined ? null : Number(r.maxKm);
@@ -638,6 +731,7 @@ function getMatrixSheet_() {
 
 // Called by the app's Driver rate matrix tab.
 function getDriverMatrix() {
+  teamOnly_();
   var values = getMatrixSheet_().getDataRange().getValues();
   var out = [];
   for (var i = 1; i < values.length; i++) {
@@ -662,6 +756,7 @@ function matrixLabel_(min, max) { return max === null ? min + ' km & above' : mi
 // Brackets must follow on with no gaps or overlaps. Blank rate clears the cell.
 // Everything is checked before anything is written; then the sheet's bracket rows are replaced.
 function saveDriverMatrix(rows) {
+  teamOnly_();
   var list = (rows || []).map(function (r) {
     var min = Number(r.minKm);
     var max = r.maxKm === '' || r.maxKm === null || r.maxKm === undefined ? null : Number(r.maxKm);
@@ -906,7 +1001,8 @@ var BROKERS_TAB = 'Brokers';
 var CLIENTS_TAB = 'Clients';
 var ADDRESSES_TAB = 'Client Addresses';
 var BROKER_HEAD = ['Broker ID', 'Brokerage', 'Contact Person', 'Contact Number', 'Base Rate (PHP)',
-                   'Position', 'Email', 'MOA File ID', 'MOA File Name', 'Truck Agreement File ID', 'Truck Agreement File Name'];
+                   'Position', 'Email', 'MOA File ID', 'MOA File Name', 'Truck Agreement File ID', 'Truck Agreement File Name',
+                   'Access Code'];   // L: brokerage portal sign-in code (blank = no portal access)
 // Brokerage documents: the column that holds the Drive file ID (the file name is in the next column)
 var BROKER_DOCS = { moa: { col: 8, label: 'MOA' }, truck: { col: 10, label: 'Truck Agreement' } };
 var MAX_DOC_BYTES = 10 * 1024 * 1024;   // 10 MB per uploaded document
@@ -944,6 +1040,7 @@ function openShared_(id, label) {
 // listed account edit access to both spreadsheets and the shared proposal and agreement folders.
 // If the folder IDs are blank, the owner's own folders become the shared ones.
 function shareWithTeam(teamText) {
+  teamOnly_();
   var emails = cleanEmails_(teamText);
   var lower = {};
   emails = emails.filter(function (e) { var k = e.toLowerCase(); if (lower[k]) return false; lower[k] = 1; return true; });
@@ -1110,9 +1207,11 @@ function rateNum_(v) { var n = Number(String(v || '').replace(/[^0-9.]/g, '')); 
 
 // Called by the app: every brokerage, client and delivery address.
 function getBrokersClients() {
+  teamOnly_();
   var brokers = readList_(brokersSheet_(), BROKER_HEAD.length).map(function (x) {
     return { id: x.v[0], name: x.v[1], contactPerson: x.v[2], contactNumber: x.v[3], baseRate: rateNum_(x.v[4]),
-             position: x.v[5], email: x.v[6], moa: fileRef_(x.v[7], x.v[8]), truck: fileRef_(x.v[9], x.v[10]) };
+             position: x.v[5], email: x.v[6], moa: fileRef_(x.v[7], x.v[8]), truck: fileRef_(x.v[9], x.v[10]),
+             accessCode: String(x.v[11] || '').trim() };
   });
   var clients = readList_(clientsSheet_(), CLIENT_HEAD.length).map(function (x) {
     return { id: x.v[0], brokerId: x.v[1], name: x.v[2], contactNumber: x.v[3], route: CLIENT_ROUTE, code: x.v[8] };
@@ -1136,6 +1235,7 @@ function getBrokersClients() {
 // b: { id?, name, baseRate, contactPerson, position, contactNumber, email }. No id = new brokerage.
 // The MOA and Truck Agreement columns are left as they are; uploadBrokerFile handles those.
 function saveBroker(b) {
+  teamOnly_();
   return withLock_(function () {
     b = b || {};
     var sh = brokersSheet_();
@@ -1151,15 +1251,26 @@ function saveBroker(b) {
     if (dupe.length) throw new Error('There is already a brokerage named ' + name + '.');
     var found = findRow_(sh, BROKER_HEAD.length, b.id);
     if (b.id && !found) throw new Error('That brokerage was not found. It may have been removed.');
+    var code = String(b.accessCode === undefined || b.accessCode === null ? '' : b.accessCode).replace(/\s+/g, '').slice(0, 40);
+    if (code && code.length < 6) throw new Error('The portal access code must be at least 6 characters, or blank for no portal access.');
+    if (code) {
+      var taken = readList_(sh, BROKER_HEAD.length).filter(function (x) { return String(x.v[11] || '').trim() === code && x.v[0] !== b.id; });
+      if (taken.length) throw new Error('Another brokerage already uses that access code. Choose a different one.');
+    }
     var row = [b.id || newId_('BR-'), name, clean_(b.contactPerson), clean_(b.contactNumber, 40), base,
                clean_(b.position), email];
-    if (found) sh.getRange(found.row, 1, 1, row.length).setValues([row]);
-    else sh.appendRow(row.concat(['', '', '', '']));
+    if (found) {
+      sh.getRange(found.row, 1, 1, row.length).setValues([row]);
+      sh.getRange(found.row, 12).setValue(code);
+    } else {
+      sh.appendRow(row.concat(['', '', '', '', code]));
+    }
     return getBrokersClients();
   });
 }
 
 function deleteBroker(id) {
+  teamOnly_();
   clientsSheet_();
   return withLock_(function () {
     var clients = readList_(clientsSheet_(), CLIENT_HEAD.length).filter(function (x) { return x.v[1] === id; });
@@ -1183,6 +1294,7 @@ function getAgreementFolder_() { return sharedOrOwnFolder_('agreements_folder_id
 // Called by the app's brokerage form. kind: 'moa' | 'truck'. file: { name, mimeType, data (base64) }.
 // Replaces the brokerage's current document of that kind (the old file goes to the Drive trash).
 function uploadBrokerFile(brokerId, kind, file) {
+  teamOnly_();
   var doc = BROKER_DOCS[kind];
   if (!doc) throw new Error('Unknown document type.');
   if (!file || !file.data) throw new Error('No file was received. Try again.');
@@ -1209,6 +1321,7 @@ function uploadBrokerFile(brokerId, kind, file) {
 
 // Called by the app's brokerage form: removes the document and clears its cells.
 function removeBrokerFile(brokerId, kind) {
+  teamOnly_();
   var doc = BROKER_DOCS[kind];
   if (!doc) throw new Error('Unknown document type.');
   return withLock_(function () {
@@ -1224,6 +1337,7 @@ function removeBrokerFile(brokerId, kind) {
 
 // c: { id?, brokerId, name, contactNumber }. The route is always CLIENT_ROUTE.
 function saveClient(c) {
+  teamOnly_();
   clientsSheet_();
   return withLock_(function () {
     c = c || {};
@@ -1248,6 +1362,7 @@ function saveClient(c) {
 
 // Removes the client and all of its delivery addresses
 function deleteClient(id) {
+  teamOnly_();
   clientsSheet_();
   return withLock_(function () {
     var addr = addressesSheet_();
@@ -1263,6 +1378,7 @@ function deleteClient(id) {
 
 // a: { id?, clientId, cityCode, barangay?, line? } (barangay and Lot # / Street / Landmark are optional). Province and city names come from the PSGC list.
 function saveAddress(a) {
+  teamOnly_();
   clientsSheet_();
   return withLock_(function () {
     a = a || {};
@@ -1296,6 +1412,7 @@ function saveAddress(a) {
 }
 
 function deleteAddress(id) {
+  teamOnly_();
   return withLock_(function () {
     var sh = addressesSheet_();
     var found = findRow_(sh, ADDRESS_HEAD.length, id);
@@ -1422,6 +1539,7 @@ function getFuelPrice() {
 
 // Called by the app's Diesel price tab.
 function saveFuelPrice(price, effectiveDate) {
+  teamOnly_();
   var p = Number(price);
   if (!(p > 0)) throw new Error('Enter a diesel price greater than 0.');
   var d = parseDateKey_(effectiveDate) || new Date();
@@ -1914,6 +2032,7 @@ function pdfBlob_(htmlContent, fileName) {
 
 // Called by the app's Download PDF button for the internal cost sheet.
 function generatePDFProposal(htmlContent) {
+  teamOnly_();
   var blob = pdfBlob_(htmlContent);
   return "data:application/pdf;base64," + Utilities.base64Encode(blob.getBytes());
 }
@@ -1925,6 +2044,10 @@ function generatePDFProposal(htmlContent) {
 // Returns { id, pdf (base64), docs: { moa, truck } (base64), missing: [labels not in Drive] }.
 function renderProposalPdf(htmlContent, opts) {
   opts = opts || {};
+  if (brokerMode_()) {
+    var who = brokerFromAuth_(opts.brokerAuth);
+    opts = { brokerId: who.v[0], includeMoa: !!opts.includeMoa, includeTruck: !!opts.includeTruck, newId: false };
+  }
   var id = opts.newId ? newProposalId_(ID_RE.test(String(opts.revisionOf || '')) ? String(opts.revisionOf) : '') : '';
   var html = String(htmlContent || '');
   if (id) html = html.split('__REF__').join(id);
@@ -1956,6 +2079,7 @@ function renderProposalPdf(htmlContent, opts) {
 // The attachment is the client proposal PDF saved in Drive (with any enclosed MOA / Truck Agreement);
 // if that copy can't be read, a fresh PDF is made from clientHtml.
 function emailProposal(req) {
+  teamOnly_();
   req = req || {};
   var to = cleanEmails_(req.to);
   if (!to.length) throw new Error('Enter the email address to send to.');
@@ -2186,6 +2310,7 @@ function stamp_() {
 
 // Called by the app's Proposals tab: sets Draft / Sent / Accepted / Declined / Expired by hand.
 function setProposalStatus(id, status) {
+  teamOnly_();
   if (STATUSES.indexOf(status) < 0) throw new Error('Unknown status.');
   var sheet = getProposalSheet_();
   var rowNum = proposalRow_(sheet, id);
@@ -2198,6 +2323,7 @@ function setProposalStatus(id, status) {
 // Called by the app: removes a saved proposal for good. Its row goes, its two PDFs go to the Drive trash,
 // its dispatch order line goes, and a proposal it had replaced is no longer marked as replaced.
 function deleteProposal(id) {
+  teamOnly_();
   if (!ID_RE.test(String(id || ''))) throw new Error('Unknown proposal.');
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
@@ -2236,6 +2362,7 @@ var DISPATCH_TAB = 'Dispatch Orders';
 var DISPATCH_HEAD = ['Saved', 'Proposal ID', 'Brokerage', 'Client', 'Destination', 'Driver', 'Driver Contact', 'Truck Plate',
                      'Trailer Plate', 'Container No.', 'Pickup', 'Delivery', 'Trip Rate (PHP)', 'Status', 'Notes', 'Prepared By'];
 function saveDispatch(id, dispatch) {
+  teamOnly_();
   dispatch = dispatch || {};
   var d = {
     driver: clean_(dispatch.driver, 120), driverContact: clean_(dispatch.driverContact, 60),
@@ -2278,6 +2405,7 @@ function saveDispatch(id, dispatch) {
 // client PDF as pdfs.clientPdf (base64) instead of clientHtml, with record.proposalId already set
 // from renderProposalPdf.
 function saveToDatabase(record, pdfs) {
+  teamOnly_();
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -2400,6 +2528,7 @@ function cellDate_(v, pattern) {
 // Called by the app's Proposals tab: one line per saved proposal, newest first.
 // Rows saved before proposals had an ID (older records with no details) are left out of the list.
 function getSavedProposals() {
+  teamOnly_();
   var sheet = getProposalSheet_();
   var last = sheet.getLastRow();
   if (last < 1) return [];
@@ -2498,6 +2627,7 @@ function recordForSheet_(record) {
 }
 
 function getSavedProposal(id) {
+  teamOnly_();
   if (!id) throw new Error('This proposal was saved before proposals could be reopened.');
   var sheet = getProposalSheet_();
   var last = sheet.getLastRow();
