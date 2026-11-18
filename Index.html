@@ -1769,12 +1769,12 @@
     <div class="modal-bg" onclick="closeCsv()"></div>
     <div class="modal-panel glass">
       <h3 id="csvTitle">Download proposals (CSV)</h3>
-      <p class="modal-sub">One block per client: client name and code, then each delivery address with POD and the rate computation (basic rate, variable, fuel surcharge, total). Pick who it is for, the brokerage, then tick the clients and delivery addresses.</p>
+      <p class="modal-sub">One block per client, like the team's Calculator sheet: each delivery address with POD and the rate (client view) or the costs and gross income (internal view), then the broker and client lines. Pick who it is for, the brokerage, then tick the clients and delivery addresses.</p>
       <div class="form-group">
         <label>For</label>
         <div class="check-list" id="csvFor">
-          <label class="check"><input type="radio" name="csvFor" value="client" checked><span>Client<small>Rate computation only, as on the client proposal</small></span></label>
-          <label class="check"><input type="radio" name="csvFor" value="internal"><span>Internal<small>Adds trip costs (fuel, driver, tolls, maintenance, admin), net % and net income</small></span></label>
+          <label class="check"><input type="radio" name="csvFor" value="client" checked><span>Client view<small>Address, POD, variable tier and rate, basic rate, variable, fuel, total</small></span></label>
+          <label class="check"><input type="radio" name="csvFor" value="internal"><span>Internal view<small>Truck rate, driver, fuel, tolls, admin, gross income and cost %</small></span></label>
         </div>
       </div>
       <div class="form-group">
@@ -4617,40 +4617,42 @@
     //   Client Name,<name> / Client Code,<code> / blank
     //   ADDRESS,,,,,POD, then the rate computation as on the client proposal (basic rate, variable with its
     //   excess km, ₱/km and bracket, fuel surcharge with its liters, km/L, diesel price and benchmark), TOTAL, NET %, NET INCOME
+    // Layout (the team's "Calculator" sheet), one block per client, then "Broker : …" and "Client : …" lines:
+    //   Client view   ADDRESS, POD, Variable Tier, Rate, BASIC RATE, RATE VARIABLE, FUEL, TOTAL
+    //   Internal view ADDRESS, POD, Truck Rate, Driver Rate, Fuel Cost, Toll Fee Cost, Admin Fee, Gross Income, Percentage
     function downloadCsv() {
       var rows = csvSelected();
       if (!rows.length) return;
       var broker = findBroker(document.getElementById('csvBroker').value);
-      var peso = function (n) {
-        return '₱' + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      };
-      var dec = function (n, d) { var x = Number(n); return isFinite(x) ? String(+x.toFixed(d)) : ''; };
+      var num = function (n) { return (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+      var peso = function (n) { return '₱' + num(n); };
       var pod = function (km) { var k = Math.round((Number(km) || 0) * 10) / 10; return (k % 1 ? k.toFixed(1) : String(k)) + ' KM'; };
-      var head = ['ADDRESS', '', '', '', '', 'POD', 'BASIC RATE', 'COVERED KM', 'EXCESS KM', 'RATE PER KM', 'BRACKET', 'RATE VARIABLE',
-        'ROUND TRIP KM', 'KM/L', 'LITERS', 'DIESEL PRICE', 'DIESEL DATE', 'BENCHMARK', 'SURCHARGE PER L', 'FUEL', 'TOTAL',
-        'VAT', 'TOTAL WITH VAT'];
+      var tier = function (label) {   // "51 – 100 km" → "51-100", "400 km & above" → "400+"
+        var m = /^(\d+)\s*[–-]\s*(\d+)/.exec(String(label || ''));
+        if (m) return m[1] + '-' + m[2];
+        var n = /^(\d+)/.exec(String(label || ''));
+        return n ? n[1] + '+' : '';
+      };
       var internal = (document.querySelector('#csvFor input:checked') || {}).value === 'internal';
-      if (internal) head.splice(head.indexOf('TOTAL'), 0, 'ADJUSTMENT');   // the client file folds an adjustment into the basic rate
-      if (internal) head = head.concat(['TRIP FUEL', 'DRIVER', 'TOLLS', 'MAINTENANCE', 'OTHER EXPENSES', 'ADMIN', 'TOTAL EXPENSES', 'NET %', 'NET INCOME']);
+      var head = internal
+        ? ['ADDRESS', 'POD', 'Truck Rate', 'Driver Rate', 'Fuel Cost', 'Toll Fee Cost', 'Admin Fee', 'Gross Income', 'Percentage']
+        : ['ADDRESS', 'POD', 'Variable Tier', 'Rate', 'BASIC RATE', 'RATE VARIABLE', 'FUEL', 'TOTAL'];
       var line = function (p) {
         var w = p.rate || {};
         var excess = w.excessKm !== undefined ? w.excessKm : p.excessKm;
-        var perKm = w.variablePerKm !== undefined ? w.variablePerKm : (excess ? p.variable / excess : '');
-        var mult = w.distanceMultiplier || 2;
-        var liters = w.liters !== undefined ? w.liters : p.liters;
-        var perL = w.surchargePerLiter !== undefined ? w.surchargePerLiter : (liters ? p.fuelSurcharge / liters : 0);
-        var vat = p.taxType === 'VAT';
+        var perKm = w.variablePerKm !== undefined ? w.variablePerKm : (excess ? p.variable / excess : 0);
         var adj = Number(w.adjustment) || 0;
-        return [p.destination, '', '', '', '', pod(w.podKm || p.distance), peso(internal ? p.baseRate : (Number(p.baseRate) || 0) + adj),
-          w.coveredKm !== undefined ? w.coveredKm + ' KM' : '', dec(excess, 1) + ' KM', perKm === '' ? '' : peso(perKm),
-          w.bracketLabel || '', peso(p.variable),
-          dec((Number(excess) || 0) * mult, 1) + ' KM', w.kmPerLiter ? dec(w.kmPerLiter, 2) : '', dec(liters, 2) + ' L',
-          peso(w.fuelPrice || p.fuelPrice), w.fuelPriceDate ? formatDate(w.fuelPriceDate) : '',
-          w.fuelBenchmark !== undefined ? peso(w.fuelBenchmark) : '', peso(perL), peso(p.fuelSurcharge)]
-          .concat(internal ? [adj ? '+ ' + peso(adj) : ''] : []).concat([peso(p.grossRate),
-          vat ? peso(p.taxAmount) : 'Non-VAT', peso(p.finalRate)]).concat(!internal ? [] : [
-          peso(p.fuelCost), peso(p.driverSalary), peso(p.tollFee), peso(p.maintCost), peso(p.additionalExpenses),
-          peso(p.adminCost), peso(p.totalExpenses), (Number(p.netPct) || 0).toFixed(2) + '%', peso(p.netIncome)]);
+        var km = w.podKm || p.distance;
+        if (!internal) {
+          return [p.destination, pod(km), tier(w.bracketLabel), peso(perKm), peso((Number(p.baseRate) || 0) + adj),
+            peso(p.variable), peso(p.fuelSurcharge), peso(p.grossRate)];
+        }
+        // Gross income here = truck rate less driver, fuel, tolls and admin (as on the team's sheet);
+        // Percentage = those costs as a share of the truck rate
+        var truck = Number(p.grossRate) || 0;
+        var costs = (Number(p.driverSalary) || 0) + (Number(p.fuelCost) || 0) + (Number(p.tollFee) || 0) + (Number(p.adminCost) || 0);
+        return [p.destination, pod(km), num(truck), num(p.driverSalary), num(p.fuelCost), num(p.tollFee), num(p.adminCost),
+          num(truck - costs), truck ? (costs / truck * 100).toFixed(2) + '%' : ''];
       };
 
       // Clients in the order of the list in the window
@@ -4664,11 +4666,11 @@
       order.forEach(function (k, i) {
         var list = groups[k], first = list[0];
         if (i) out.push([], []);
-        out.push(['Client Name', first.clientName || '']);
-        out.push(['Client Code', clientCode(first.clientId, first.clientName)]);
-        out.push([]);
         out.push(head);
         list.forEach(function (p) { out.push(line(p)); });
+        out.push([]);
+        out.push(['Broker : ' + (broker ? broker.name : first.companyName || '')]);
+        out.push(['Client : ' + (first.clientName || '')]);
       });
       var text = out.map(function (r) { return r.map(csvCell).join(','); }).join('\r\n');
       var who = order.length === 1 ? (groups[order[0]][0].clientName || 'client') : (broker ? broker.name : 'brokerage');
