@@ -63,7 +63,7 @@ proposal only (no internal cost sheet, settings, saved proposals or other broker
 ## Notes
 
 - Route rules for trailers: southbound via the NLEX Connector (C-3 → Magsaysay); northbound via
-  R-10 → Harbor Link (Karuhatan); Pasig area via Osmeña or Mindanao Ave corridors; Malabon /
+  R-10 → Harbor Link (Karuhatan); Pasig area via a direct city route or the Mindanao Ave corridor (Metro Manila never uses the NLEX Connector or Osmeña); Malabon /
   Valenzuela / Caloocan via the Harbor Link; EDSA (Magallanes–North Ave) is avoided.
 - Address data: PSGC via github.com/bendlikeabamboo/barangay (MIT).
 

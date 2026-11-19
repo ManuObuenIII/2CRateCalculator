@@ -2719,9 +2719,10 @@
 
     // Pasig-area trips go through one of two corridors; each is offered with its tolls
     var PASIG_CORRIDOR_SUGG = [
-      { corridor: 'osmena', title: 'Via Osmeña Highway',
-        segs: [{ x: 'NLEX Connector', a: 'C-3 Road/5th Ave.', b: 'Magsaysay' }],
-        note: 'NLEX Connector to Magsaysay, then Osmeña Highway and C-5 by city streets' },
+      // Metro Manila trips don't use the NLEX Connector or Osmeña Highway (those are for long hauls south)
+      { corridor: 'direct', title: 'Direct city route',
+        segs: [],
+        note: 'City roads, no expressway and no tolls; the EDSA truck-ban stretch is avoided' },
       { corridor: 'mindanao', title: 'Via Mindanao Avenue',
         segs: [{ x: 'NLEX Harbor Link', a: 'R-10/Port of Manila', b: 'Karuhatan/Valenzuela' }, { x: 'NLEX/SCTEX', a: 'Karuhatan', b: 'Mindanao Ave.' }],
         note: 'Harbor Link and NLEX to Mindanao Ave., then Mindanao Avenue and C-5' }
@@ -2847,7 +2848,7 @@
       var anim = key !== suggKey;
       suggKey = key;
       return '<div class="sugg-list' + (anim ? ' anim' : '') + '">' + tollSuggestions.map(function (sg, i) {
-        var route = sg.segs.map(function (s) { return esc(s.a) + ' → ' + esc(s.b) + ' (' + esc(s.x) + ')'; }).join(' · ');
+        var route = sg.segs.length ? sg.segs.map(function (s) { return esc(s.a) + ' → ' + esc(s.b) + ' (' + esc(s.x) + ')'; }).join(' · ') : 'No toll roads';
         var meta = sg.corridor
           ? 'Round trip · ' + fmt(sg.oneWay) + ' one way · ' + esc(sg.note)
           : 'Round trip · ' + fmt(sg.oneWay) + ' one way · exit about ' + num(sg.km, 0) + ' km from the destination' + (sg.note ? ' · ' + esc(sg.note) : '');

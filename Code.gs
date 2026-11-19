@@ -33,12 +33,13 @@ var NORTHBOUND_VIA = ['Radial Road 10, Navotas, Metro Manila', 'Karuhatan, Valen
 var NORTHBOUND_VIA_LABEL = 'R-10 and Harbor Link to NLEX (Karuhatan)';
 
 // Pasig area (Pasig and the cities around it: Marikina, Quezon City, San Juan, Mandaluyong, Makati, Taguig,
-// Pateros, plus all of Rizal province): trailers go through one of two corridors.
-// The app sends the one picked in the toll suggestions; 'auto' tries both and takes the shorter.
+// Pateros, plus all of Rizal province): a direct city route, or the Mindanao Avenue corridor.
+// The NLEX Connector and Osmeña Highway are long-haul (southbound) rules only and are never forced on
+// a Metro Manila trip. The app sends the one picked in the toll suggestions; 'auto' tries both and takes the shorter.
 var PASIG_CORRIDORS = {
-  osmena: {
-    via: SOUTHBOUND_VIA.concat(['Osmeña Highway corner Quirino Avenue, Manila, Metro Manila', 'C-5 Road, Ususan, Taguig City, Metro Manila']),
-    label: 'NLEX Connector, Osmeña Highway and C-5'
+  direct: {
+    via: [],                                  // Google's route, checked for the EDSA truck ban (C-5 detour if needed)
+    label: 'Direct city route (no NLEX Connector or Osmeña Highway)'
   },
   mindanao: {
     via: NORTHBOUND_VIA.concat(['Mindanao Avenue corner Congressional Avenue, Quezon City, Metro Manila',
@@ -51,7 +52,7 @@ var PASIG_CORRIDORS = {
     label: 'R-10 and Harbor Link (exit Karuhatan)'
   }
 };
-var PASIG_AUTO_CORRIDORS = ['osmena', 'mindanao'];   // what 'auto' compares for the Pasig area
+var PASIG_AUTO_CORRIDORS = ['direct', 'mindanao'];   // what 'auto' compares for the Pasig area
 
 // Trucks are banned from EDSA between Magallanes (Makati) and North Avenue (Quezon City).
 // Each Google route is checked for EDSA inside this stretch. If it uses it, the shortest alternative
