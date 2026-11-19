@@ -69,7 +69,7 @@
       if (fromLink) { APP_URL = fromLink[1]; try { localStorage.setItem('2c_portal_app', APP_URL); } catch (e) {} }
       if (!APP_URL) APP_URL = localStorage.getItem('2c_portal_app') || '';
     } catch (e) { /* storage off: the link must carry the address */ }
-    if (!APP_URL) APP_URL = 'https://script.google.com/macros/s/AKfycbxEBxmt7uQgJOIz8M6FdoF_Ry6hHtfNmUE8-SwfEz-3yPaDNklago1DVUYUsJaJ-ycfaw/exec';   // the current portal deployment
+    if (!APP_URL) APP_URL = '';   // the current portal deployment
     var app = document.getElementById('app'), splash = document.getElementById('splash'), lead = document.getElementById('lead');
     var ua = navigator.userAgent;
     var standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true

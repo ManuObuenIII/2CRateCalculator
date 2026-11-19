@@ -16,7 +16,7 @@ var FAVICON_URL = 'https://raw.githubusercontent.com/ManuObuenIII/2CRateCalculat
 // added after the # so the page knows which Apps Script app to open: <PORTAL_PAGE>#<portal_url from Settings>.
 var PORTAL_PAGE = 'https://manuobueniii.github.io/2CRateCalculator/portal/';
 // The portal deployment's address. Settings → Brokerage portal link overrides it when set.
-var PORTAL_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbxEBxmt7uQgJOIz8M6FdoF_Ry6hHtfNmUE8-SwfEz-3yPaDNklago1DVUYUsJaJ-ycfaw/exec';
+var PORTAL_URL_DEFAULT = '';
 function portalLink_() {
   var url = String(settings_().portal_url || '').trim() || PORTAL_URL_DEFAULT;
   return url ? PORTAL_PAGE + '#' + url : '';
@@ -114,7 +114,7 @@ var SETTING_DEFS = [
   ['team_emails', 'Team (Google accounts that use the app)', '', 'textarea', 'One email per line. Press "Share with team" to give them access to the spreadsheets and Drive folders'],
   ['portal_admin_pct', 'Brokerage portal: admin %', 5, 'number', 'Used for proposals a brokerage generates in the portal'],
   ['portal_net_pct', 'Brokerage portal: target net income %', 20, 'number', 'Used for proposals a brokerage generates in the portal'],
-  ['portal_url', 'Brokerage portal link', 'https://script.google.com/macros/s/AKfycbxEBxmt7uQgJOIz8M6FdoF_Ry6hHtfNmUE8-SwfEz-3yPaDNklago1DVUYUsJaJ-ycfaw/exec', 'text', 'The portal deployment\'s web app URL. Included in the sign-in email sent to new portal users']
+  ['portal_url', 'Brokerage portal link', '', 'text', 'The portal deployment\'s web app URL. Included in the sign-in email sent to new portal users']
 ];
 var SETTINGS_MEMO_ = null;
 
