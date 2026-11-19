@@ -60,6 +60,15 @@ proposal only (no internal cost sheet, settings, saved proposals or other broker
    delivery addresses. The proposal uses the portal admin % and target net income % from Settings. Everything else the
    script offers (`teamOnly_()`) refuses calls from the portal.
 
+## Metro Manila truck rules
+
+`Code.gs` → *METRO MANILA TRUCK RULES*. Every Google route is checked against the MMDA truck ban:
+EDSA (Magallanes–North Ave) is never used; the ban-hour roads (España/Quezon Ave, Recto, Quirino, P. Burgos–Aurora
+Blvd, E. Rodriguez, South Superhighway/Nagtahan, Taft, Bonifacio Dr/Roxas Blvd/NAIA Rd, Rizal Ave, Reina
+Regente/Abad Santos; 6–10 AM and 5–10 PM Mon–Sat) are avoided for Metro Manila trips when a route at most 25% longer
+does so, trying the MMDA northern/eastern port truck routes and C-3/C-5; otherwise the cost sheet says to travel
+outside the ban hours. Makati CBD, Ortigas and BGC deliveries are flagged. Edit the lists there when MMDA rules change.
+
 ## Notes
 
 - Route rules for trailers: southbound via the NLEX Connector (C-3 → Magsaysay); northbound via

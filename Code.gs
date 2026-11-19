@@ -38,8 +38,8 @@ var NORTHBOUND_VIA_LABEL = 'R-10 and Harbor Link to NLEX (Karuhatan)';
 // a Metro Manila trip. The app sends the one picked in the toll suggestions; 'auto' tries both and takes the shorter.
 var PASIG_CORRIDORS = {
   direct: {
-    via: [],                                  // Google's route, checked for the EDSA truck ban (C-5 detour if needed)
-    label: 'Direct city route (no NLEX Connector or Osmeña Highway)'
+    via: [],                                  // truck-legal city route: see METRO MANILA TRUCK RULES below
+    label: 'Direct truck route (no NLEX Connector or Osmeña Highway)'
   },
   mindanao: {
     via: NORTHBOUND_VIA.concat(['Mindanao Avenue corner Congressional Avenue, Quezon City, Metro Manila',
@@ -53,6 +53,43 @@ var PASIG_CORRIDORS = {
   }
 };
 var PASIG_AUTO_CORRIDORS = ['direct', 'mindanao'];   // what 'auto' compares for the Pasig area
+
+// ---------- METRO MANILA TRUCK RULES (MMDA truck ban) ----------
+// Every route is checked against these. Check MMDA advisories for changes and edit here.
+// 1. EDSA, Magallanes to North Ave: closed to cargo trucks Monday to Saturday (EDSA_BAN_BOX below). Never used.
+// 2. Ban-hour roads: closed to trucks during TRUCK_BAN_HOURS. A Metro Manila trip avoids them when a route that
+//    does is at most TRUCK_WINDOW_DETOUR_MAX times as long; otherwise the cost sheet says to travel outside those hours.
+// 3. Business districts with their own delivery windows: flagged when the destination is inside.
+// [name, regex on Google's step text, [south, west, north, east] box the stretch lies in]
+var TRUCK_BAN_HOURS = '6–10 AM and 5–10 PM, Monday to Saturday (not Sundays or holidays)';
+var TRUCK_WINDOW_DETOUR_MAX = 1.25;
+var TRUCK_WINDOW_ROADS = [
+  ['España Blvd / Quezon Ave (Echague St to West/South Ave)', /Espa[ñn]a|Quezon Ave/i, [14.598, 120.983, 14.646, 121.036]],
+  ['C.M. Recto Ave (Legarda St to Del Pan St)', /Recto/i, [14.596, 120.963, 14.607, 120.993]],
+  ['President Quirino Ave (South Superhighway to Roxas Blvd)', /Quirino/i, [14.565, 120.978, 14.585, 121.005]],
+  ['P. Burgos / Ayala Blvd / Legarda / Magsaysay Blvd / Aurora Blvd (Roxas Blvd to Boston St)', /Burgos|Ayala B|Legarda|Magsaysay|Aurora B/i, [14.578, 120.974, 14.628, 121.060]],
+  ['E. Rodriguez Ave / Bonifacio Ave (Welcome Rotonda to Shoe Ave)', /E\.? ?Rodriguez|(?<!A\. )Bonifacio Ave/i, [14.605, 121.000, 14.640, 121.105]],
+  ['South Superhighway / Nagtahan Bridge / A. Mendoza St (EDSA to Dimasalang)', /South Super|Osme[ñn]a|Nagtahan|Mendoza/i, [14.538, 120.990, 14.612, 121.022]],
+  ['Taft Ave / Quirino Ave incl. MacArthur, Quezon and Jones bridges (Redemptorist to Lawton)', /Taft|Mac ?Arthur|Quezon Bridge|Jones Bridge/i, [14.530, 120.975, 14.598, 121.000]],
+  ['Bonifacio Drive / Roxas Blvd / NAIA Road', /Bonifacio Dr|Roxas B|NAIA R/i, [14.505, 120.965, 14.600, 121.010]],
+  ['Rizal Ave / Rizal Ave Extension (Carriedo St to Monumento)', /Rizal Ave/i, [14.598, 120.978, 14.658, 120.990]],
+  ['Reina Regente St / Abad Santos Ave (Reina Regente Bridge to Rizal Ave Ext)', /Reina Regente|Abad Santos/i, [14.598, 120.972, 14.625, 120.985]]
+];
+var TRUCK_DISTRICTS = [
+  ['Makati CBD', 'trucks are not allowed from 6 AM to 10 PM; deliver at night', [14.548, 121.012, 14.566, 121.035]],
+  ['Ortigas Center', 'truck ban hours apply; deliver outside ' + TRUCK_BAN_HOURS, [14.580, 121.053, 14.592, 121.066]],
+  ['Bonifacio Global City', 'truck ban hours apply; deliver outside ' + TRUCK_BAN_HOURS, [14.540, 121.040, 14.560, 121.058]]
+];
+// Designated truck routes from the Port Area (MMDA), tried for Metro Manila trips when Google's routes use
+// ban-hour roads. The southern port route runs on South Superhighway (Osmeña), so it is not used for Metro Manila.
+var TRUCK_ROUTE_SETS = [
+  { label: 'MMDA northern truck route (R-10, Capulong, Dimasalang, A. Bonifacio Ave)',
+    via: ['Capulong Street, Tondo, Manila', 'Dimasalang Street, Sampaloc, Manila', 'A. Bonifacio Avenue, Quezon City'] },
+  { label: 'MMDA eastern truck route (R-10, Capulong, Laong Laan, D. Tuazon)',
+    via: ['Capulong Street, Tondo, Manila', 'Laong Laan Road, Sampaloc, Manila', 'D. Tuazon Street, Quezon City'] },
+  { label: 'C-3 (Araneta Ave) and C-5',
+    via: ['Gregorio Araneta Avenue, Quezon City', 'C-5 Road, Libis, Quezon City'] }
+];
 
 // Trucks are banned from EDSA between Magallanes (Makati) and North Avenue (Quezon City).
 // Each Google route is checked for EDSA inside this stretch. If it uses it, the shortest alternative
@@ -517,16 +554,16 @@ function calculate_(data) {
       return one;
     }
     // Pasig area, no corridor picked: try both, prefer a route off EDSA, then the shorter one
-    var best = null;
+    var found = [];
     PASIG_AUTO_CORRIDORS.forEach(function (k) {
       var r = getTruckRoute_(source, target, PASIG_CORRIDORS[k].via, 'metro');
       if (!r) return;
       r.corridor = k;
       r.target = target;
-      var rBad = r.truckCheck === 'edsa', bestBad = best && best.truckCheck === 'edsa';
-      if (!best || (bestBad && !rBad) || (rBad === bestBad && r.km < best.km)) best = r;
+      r.edsa = r.truckCheck === 'edsa';
+      found.push(r);
     });
-    return best;
+    return pickTruck_(found);
   };
   var route = null;   // the Google Maps route (checked for EDSA), also drawn on the internal cost sheet
   if (!(distanceOverride > 0)) {
@@ -536,8 +573,8 @@ function calculate_(data) {
     }
   }
   var distanceKm = distanceOverride > 0 ? distanceOverride : (route ? route.km : 0);
-  var routeVia = !route ? '' : (route.corridor ? PASIG_CORRIDORS[route.corridor].label
-          : (tollDirection === 'south' ? SOUTHBOUND_VIA_LABEL : (tollDirection === 'north' ? NORTHBOUND_VIA_LABEL : '')));
+  var routeVia = !route ? '' : (route.truckSet ? route.truckSet : (route.corridor ? PASIG_CORRIDORS[route.corridor].label
+          : (tollDirection === 'south' ? SOUTHBOUND_VIA_LABEL : (tollDirection === 'north' ? NORTHBOUND_VIA_LABEL : ''))));
   var routeMap = route ? { polyline: route.polyline, detail: route.detail, start: route.start, end: route.end } : null;
   if (distanceKm === 0) throw new Error("Route not found on Google Maps. Try a more specific address or enter the distance manually.");
   var podKm = Math.round(distanceKm); // whole km for the rate card, masterlist and driver matrix
@@ -613,6 +650,9 @@ function calculate_(data) {
     routeMap: routeMap,                      // saved with the proposal, small
     truckCheck: route ? route.truckCheck : '', // clear | alternative | detour | edsa
     truckDetour: route ? (route.detour || '') : '',
+    truckWindowRoads: route ? (route.window || []) : [],       // ban-hour roads the route still uses
+    truckBanHours: TRUCK_BAN_HOURS,
+    truckDistrict: route ? truckDistrictOf_(route.end) : null,
     routeStats: route ? { driveMin: route.driveMin, expresswayKm: route.expresswayKm } : null,   // Google's figures
     trailerAvgKph: TRAILER_AVG_KPH,
     routeAnalysis: route ? analyzeRoute_(route, source, data.proposalDate) : null,   // terrain, traffic, advisories
@@ -1812,6 +1852,46 @@ function usesBannedEdsa_(route) {
   });
 }
 
+function inBox_(lat, lng, b) { return lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3]; }
+// Names of the ban-hour roads a Google route drives along (steps of 150 m or more inside the stretch)
+function windowRoadsUsed_(route) {
+  var hits = [];
+  TRUCK_WINDOW_ROADS.forEach(function (w) {
+    var used = (route.legs || []).some(function (leg) {
+      return (leg.steps || []).some(function (st) {
+        var text = String(st.html_instructions || '').replace(/<[^>]+>/g, ' ');
+        if (!w[1].test(text) || (st.distance && st.distance.value < 150)) return false;
+        var pts = st.polyline && st.polyline.points ? decodePolyline_(st.polyline.points) : [];
+        if (st.start_location) pts.push([st.start_location.lat, st.start_location.lng]);
+        return pts.some(function (p) { return inBox_(p[0], p[1], w[2]); });
+      });
+    });
+    if (used) hits.push(w[0]);
+  });
+  return hits;
+}
+// The business district (and its rule) the destination is in, or null
+function truckDistrictOf_(loc) {
+  if (!loc) return null;
+  for (var i = 0; i < TRUCK_DISTRICTS.length; i++) {
+    var d = TRUCK_DISTRICTS[i];
+    if (inBox_(loc.lat, loc.lng, d[2])) return { name: d[0], rule: d[1] };
+  }
+  return null;
+}
+// Best route for a truck: never EDSA (if any route avoids it); then the fewest ban-hour roads among routes no more
+// than TRUCK_WINDOW_DETOUR_MAX times the shortest; then the shortest.
+function pickTruck_(list) {
+  list = list.filter(Boolean);
+  if (!list.length) return null;
+  var legal = list.filter(function (r) { return !r.edsa; });
+  var pool = legal.length ? legal : list;
+  var shortest = Math.min.apply(null, pool.map(function (r) { return r.km; }));
+  var near = pool.filter(function (r) { return r.km <= shortest * TRUCK_WINDOW_DETOUR_MAX + 0.5; });
+  near.sort(function (a, b) { return (a.window.length - b.window.length) || (a.km - b.km); });
+  return near[0];
+}
+
 function routeInfo_(r) {
   var meters = 0, seconds = 0, expressway = 0;
   (r.legs || []).forEach(function (leg) {
@@ -1834,6 +1914,7 @@ function routeInfo_(r) {
     start: r.legs[0].start_location,
     end: last.end_location,
     edsa: usesBannedEdsa_(r),
+    window: windowRoadsUsed_(r),
     warnings: (r.warnings || []).filter(function (w) { return !/has tolls/i.test(w); }).slice(0, 5),
     driveMin: Math.round(seconds / 60),
     expresswayKm: Math.min(expressway, meters) / 1000
@@ -1853,11 +1934,20 @@ function getTruckRoute_(source, destination, via, dir) {
   via = via || [];
   var routes = directions_(source, destination, via, via.length === 0).map(routeInfo_).filter(Boolean);
   if (!routes.length) return null;
-  var clean = routes.filter(function (r) { return !r.edsa; }).sort(function (a, b) { return a.km - b.km; });
-  if (clean.length) {
-    clean[0].truckCheck = routes[0].edsa ? 'alternative' : 'clear';
-    clean[0].viaUsed = via;
-    return clean[0];
+  routes.forEach(function (r) { r.viaUsed = via; });
+  var googleFirst = routes[0];
+  // Metro Manila with no fixed corridor: when every Google route uses EDSA or a ban-hour road, also try the
+  // designated truck routes
+  if (dir === 'metro' && !via.length && !routes.some(function (r) { return !r.edsa && !r.window.length; })) {
+    TRUCK_ROUTE_SETS.forEach(function (set) {
+      var d = directions_(source, destination, set.via, false).map(routeInfo_).filter(Boolean)[0];
+      if (d) { d.viaUsed = set.via; d.truckSet = set.label; routes.push(d); }
+    });
+  }
+  var best = pickTruck_(routes);
+  if (best && !best.edsa) {
+    best.truckCheck = best === googleFirst ? 'clear' : (best.truckSet ? 'truckroute' : 'alternative');
+    return best;
   }
   var detour = TRUCK_DETOUR[dir];
   if (detour) {

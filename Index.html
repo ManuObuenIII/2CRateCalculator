@@ -2280,14 +2280,23 @@
     }
 
     // Trucks are banned from EDSA between Magallanes and North Ave.: say how the route was checked
+    // MMDA truck rules: EDSA (Magallanes to North Ave.) is never used; ban-hour roads are avoided where possible
     function truckCheckHtml(r) {
       var ban = 'trucks are banned on EDSA from Magallanes to North Ave.';
-      if (r.truckCheck === 'clear') return '<div class="route-map-cap">Truck route check: the route stays off EDSA (' + ban + ')</div>';
-      if (r.truckCheck === 'alternative') return '<div class="route-map-cap">Truck route check: Google\'s fastest route used EDSA, so the shortest route that stays off EDSA was used (' + ban + ')</div>';
-      if (r.truckCheck === 'detour') return '<div class="route-map-cap">Truck route check: sent via ' + esc(r.truckDetour) + ' to stay off EDSA (' + ban + ')</div>';
-      if (r.truckCheck === 'edsa') return '<div class="note warn-note">Check the route: Google Maps only found routes that use EDSA, where '
-        + ban.replace('trucks', 'trucks') + ' Confirm the trailer route and enter the distance by hand if it differs.</div>';
-      return '';
+      var h = '';
+      if (r.truckCheck === 'clear') h = '<div class="route-map-cap">Truck route check: the route stays off EDSA (' + ban + ')'
+        + (r.truckWindowRoads && !r.truckWindowRoads.length && r.truckBanHours ? ' and off the truck ban-hour roads' : '') + '.</div>';
+      else if (r.truckCheck === 'alternative') h = '<div class="route-map-cap">Truck route check: Google\'s fastest route used EDSA or a truck ban-hour road, so a route trucks can use was taken instead (' + ban + ')</div>';
+      else if (r.truckCheck === 'truckroute') h = '<div class="route-map-cap">Truck route check: sent along the ' + esc(r.routeVia) + ', keeping off EDSA and the truck ban-hour roads.</div>';
+      else if (r.truckCheck === 'detour') h = '<div class="route-map-cap">Truck route check: sent via ' + esc(r.truckDetour) + ' to stay off EDSA (' + ban + ')</div>';
+      else if (r.truckCheck === 'edsa') h = '<div class="note warn-note">Check the route: Google Maps only found routes that use EDSA, where '
+        + ban + ' Confirm the trailer route and enter the distance by hand if it differs.</div>';
+      if (r.truckWindowRoads && r.truckWindowRoads.length) {
+        h += '<div class="note warn-note">Truck ban hours: this route uses ' + r.truckWindowRoads.map(esc).join('; ')
+          + '. Trucks are not allowed there ' + esc(r.truckBanHours || '6–10 AM and 5–10 PM, Monday to Saturday') + ', so schedule the trip outside those hours.</div>';
+      }
+      if (r.truckDistrict) h += '<div class="note warn-note">Delivery in ' + esc(r.truckDistrict.name) + ': ' + esc(r.truckDistrict.rule) + '.</div>';
+      return h;
     }
 
     // ----- zoomable route map (Leaflet + OpenStreetMap) -----
@@ -2549,6 +2558,8 @@
       // Things worth a second look
       var flags = [];
       if (r.truckCheck === 'edsa') flags.push('Google only found routes through EDSA. Check the distance against the actual trailer route.');
+      if (r.truckWindowRoads && r.truckWindowRoads.length) flags.push('The route uses ' + r.truckWindowRoads.length + ' truck ban-hour road' + (r.truckWindowRoads.length === 1 ? '' : 's') + ': travel outside ' + esc(r.truckBanHours || '6–10 AM and 5–10 PM, Monday to Saturday') + '.');
+      if (r.truckDistrict) flags.push('Destination is in ' + esc(r.truckDistrict.name) + ': ' + esc(r.truckDistrict.rule) + '.');
       if (r.grossProfit < 0) flags.push('The billed rate does not cover the direct cost of this trip.');
       else if (r.netIncomePctActual < r.targetNetIncomePct) flags.push('Net income is below target: see the rate needed above.');
       if (total > 0 && r.tollFee / total > 0.2) flags.push('Tolls are ' + pct(r.tollFee / total) + ' of the trip cost. They are not billed separately on the rate card.');
@@ -2722,7 +2733,7 @@
       // Metro Manila trips don't use the NLEX Connector or Osmeña Highway (those are for long hauls south)
       { corridor: 'direct', title: 'Direct city route',
         segs: [],
-        note: 'City roads, no expressway and no tolls; the EDSA truck-ban stretch is avoided' },
+        note: 'Roads trucks may use: off EDSA, ban-hour roads avoided where possible, MMDA truck routes if needed; no tolls' },
       { corridor: 'mindanao', title: 'Via Mindanao Avenue',
         segs: [{ x: 'NLEX Harbor Link', a: 'R-10/Port of Manila', b: 'Karuhatan/Valenzuela' }, { x: 'NLEX/SCTEX', a: 'Karuhatan', b: 'Mindanao Ave.' }],
         note: 'Harbor Link and NLEX to Mindanao Ave., then Mindanao Avenue and C-5' }
