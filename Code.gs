@@ -2772,6 +2772,68 @@ function recordForSheet_(record) {
   return copy;
 }
 
+// Called by the Proposals tab: recalculates every current proposal (not ones replaced by a revision) with
+// today's Masterlist, driver rate matrix, brokerage base rates, maintenance settings and this week's diesel
+// price. The saved distance, route, tolls, other expenses, admin %, target % and tax type are kept.
+// The figures and the stored proposal are updated in place; the saved PDFs are cleared, since they no longer
+// match (Download PDF makes a fresh one from the updated proposal).
+function readjustProposals() {
+  teamOnly_();
+  var lock = LockService.getScriptLock();
+  lock.waitLock(60000);
+  try {
+    var sheet = getProposalSheet_();
+    var last = sheet.getLastRow();
+    if (last < 2 || sheet.getLastColumn() < COL_LAST) return { adjusted: 0, skipped: 0, errors: [] };
+    var values = sheet.getRange(2, 1, last - 1, COL_LAST).getValues();
+    var today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm') + ' · adjusted to current rates by '
+      + (Session.getActiveUser().getEmail() || 'app');
+    var adjusted = 0, skipped = 0, errors = [];
+    for (var i = 0; i < values.length; i++) {
+      var r = values[i];
+      var id = String(r[COL_PROPOSAL_ID - 1] || '');
+      if (!id || !(r[0] instanceof Date)) continue;
+      if (String(r[COL_SUPERSEDED_BY - 1] || '')) { skipped++; continue; }
+      var old;
+      try { old = JSON.parse(String(r[COL_RECORD_JSON - 1] || '')); } catch (e) { errors.push(id + ': stored proposal could not be read'); continue; }
+      if (!old || !old.rateCard) { errors.push(id + ': stored proposal has no rate card'); continue; }
+      try {
+        var fresh = calculate_({
+          destination: old.destination, destinationArea: old.destinationArea, brokerId: old.brokerId,
+          taxType: old.taxType, proposalDate: today,                     // today: this week's diesel price
+          tollFee: old.tollFee, tollRoute: old.tollRoute, tollDirection: old.tollDirection,
+          additionalExpenses: old.additionalExpenses, adminPct: (old.adminPct || 0) * 100, incomePct: (old.targetNetIncomePct || 0) * 100,
+          distanceOverride: old.distance, metroCorridor: ''             // saved distance: no new Maps lookup
+        });
+      } catch (e) { errors.push(id + ': ' + e.message); continue; }
+      var rec = {};
+      for (var k in old) rec[k] = old[k];
+      // Everything that comes from the rates and prices is refreshed; the route, dates and identity stay
+      ['podKm', 'roundTripKm', 'kmPerLiter', 'fuelConsumption', 'fuelPrice', 'fuelPriceDate', 'fuelCost', 'maintFixed', 'maintPerKm',
+       'maintCost', 'driverSalary', 'driverBracket', 'totalExpenses', 'adminCost', 'netIncome', 'netIncomePctActual', 'grossProfit',
+       'grossProfitPct', 'targetRate', 'rateCard', 'cardRate', 'discount', 'adjustment', 'adjustmentPct', 'grossRate', 'taxAmount',
+       'finalRate', 'vatRate', 'terms', 'signatory'].forEach(function (key) { if (fresh[key] !== undefined) rec[key] = fresh[key]; });
+      rec.adjustedAt = stamp;
+      rec.pdfClientUrl = '';
+      rec.pdfInternalUrl = '';
+      var rc = rec.rateCard || {};
+      var row = i + 2;
+      sheet.getRange(row, 8, 1, 2).setValues([[rec.fuelCost, rec.driverSalary]]);                       // H, I
+      sheet.getRange(row, 13, 1, 7).setValues([[rec.totalExpenses, rec.adminCost, rec.maintCost, rec.netIncome,  // M–S
+        rec.grossRate, rec.taxAmount, rec.finalRate]]);
+      sheet.getRange(row, 23, 1, 2).setValues([[rec.fuelConsumption, rec.fuelPrice]]);                   // W, X
+      sheet.getRange(row, 27, 1, 9).setValues([[rec.netIncomePctActual * 100, rc.baseRate || '', rc.excessKm || '',   // AA–AI
+        rc.variable || '', rc.liters || '', rc.fuelSurcharge || '', rec.driverBracket, rec.kmPerLiter, rec.maintPerKm]]);
+      sheet.getRange(row, COL_RECORD_JSON, 1, 3).setValues([[JSON.stringify(recordForSheet_(rec)), '', '']]);  // AK–AM
+      sheet.getRange(row, COL_STATUS_CHANGED).setValue(stamp);
+      adjusted++;
+    }
+    SpreadsheetApp.flush();
+    return { adjusted: adjusted, skipped: skipped, errors: errors };
+  } finally { lock.releaseLock(); }
+}
+
 function getSavedProposal(id) {
   teamOnly_();
   if (!id) throw new Error('This proposal was saved before proposals could be reopened.');

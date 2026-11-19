@@ -1602,6 +1602,7 @@
             <input type="search" id="savedSearch" placeholder="Search proposals" oninput="renderSavedList()" aria-label="Search saved proposals">
             <button type="button" class="btn-glass refresh-btn" onclick="loadSaved()">Refresh</button>
             <button type="button" class="btn-glass refresh-btn" onclick="openCsv()">Download CSV</button>
+            <button type="button" class="btn-glass refresh-btn accent" id="adjustBtn" onclick="readjustProposals()">Adjust to current rates</button>
           </div>
           <div id="savedStatus" class="matrix-status">Loading saved proposals…</div>
           <div id="savedList" class="saved-list"></div>
@@ -2078,6 +2079,7 @@
       if (r.proposalId) h += '<div class="receipt-date">Ref. ' + esc(r.proposalId) + (r.revisionOf ? ' (revises ' + esc(r.revisionOf) + ')' : '') + '</div>';
       if (r.validUntil) h += '<div class="receipt-date">Valid until ' + esc(formatDate(r.validUntil)) + '</div>';
       if (internal && r.preparedBy) h += '<div class="receipt-date">Prepared by ' + esc(r.preparedBy) + '</div>';
+      if (internal && r.adjustedAt) h += '<div class="receipt-date">Adjusted to current rates ' + esc(String(r.adjustedAt).split(' · ')[0]) + '</div>';
       h += '</td></tr></table>';
       h += '<div class="receipt-route">' + esc(r.source) + ' &nbsp;➔&nbsp; ' + esc(r.clientName || r.destination)
         + (r.clientName ? '<div class="route-meta">' + esc(r.destination) + '</div>' : '')
@@ -4600,6 +4602,28 @@
         .getSavedProposals();
     }
 
+    // ---------- adjust every saved proposal to today's rates and diesel price ----------
+    function readjustProposals() {
+      var n = savedList.filter(function (p) { return !p.supersededBy; }).length;
+      if (!n) { toastError('No saved proposals to adjust.'); return; }
+      if (!confirm('Recalculate all ' + n + ' current proposal' + (n === 1 ? '' : 's') + ' with today\'s Masterlist, driver rates, base rates, maintenance settings and diesel price?\n\n'
+        + 'Distances, routes, tolls, other expenses, margins and tax stay as saved. The saved PDFs are cleared; Download PDF makes fresh ones.')) return;
+      var btn = document.getElementById('adjustBtn');
+      busy(btn, 'Adjusting…');
+      google.script.run
+        .withSuccessHandler(function (r) {
+          idle(btn, 'Adjust to current rates');
+          var msg = r.adjusted + ' proposal' + (r.adjusted === 1 ? '' : 's') + ' adjusted' + (r.skipped ? ', ' + r.skipped + ' revised version' + (r.skipped === 1 ? '' : 's') + ' left as is' : '') + '.';
+          if (r.errors && r.errors.length) alert(msg + '\n\nNot adjusted:\n' + r.errors.join('\n'));
+          else toast(msg, 'ok');
+          var open = viewers.saved.record && viewers.saved.record.proposalId;
+          loadSaved();
+          if (open) openSaved(open);
+        })
+        .withFailureHandler(function (error) { idle(btn, 'Adjust to current rates'); toastError("Couldn't adjust the proposals: " + error.message); })
+        .readjustProposals();
+    }
+
     // ---------- CSV download: one brokerage, ticked clients and delivery addresses ----------
     function openCsv() {
       var go = function () {
@@ -4762,7 +4786,8 @@
         var list = groups[k], first = list[0];
         if (i) out.push([], []);
         out.push(head);
-        list.forEach(function (p) { out.push(line(p)); });
+        list.slice().sort(function (x, y) { return (Number(y.distance) || 0) - (Number(x.distance) || 0); })   // POD, highest first
+          .forEach(function (p) { out.push(line(p)); });
         out.push([]);
         out.push(['Broker : ' + (broker ? broker.name : first.companyName || '')]);
         out.push(['Client : ' + (first.clientName || '')]);
