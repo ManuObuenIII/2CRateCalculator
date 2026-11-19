@@ -12,6 +12,13 @@ var ORIGIN_LABEL = 'Manila Port';
 // Browser-tab / home-screen icon for the web app: the 2C logo as a square PNG, served from the GitHub repo.
 // Apps Script needs a public PNG/ICO URL for this (data: URLs are not accepted).
 var FAVICON_URL = 'https://raw.githubusercontent.com/ManuObuenIII/2CRateCalculator/main/assets/favicon-192.png';
+// The brokerage portal page on GitHub Pages (installable on phones). The portal deployment's own address is
+// added after the # so the page knows which Apps Script app to open: <PORTAL_PAGE>#<portal_url from Settings>.
+var PORTAL_PAGE = 'https://manuobueniii.github.io/2CRateCalculator/portal/';
+function portalLink_() {
+  var url = String(settings_().portal_url || '').trim();
+  return url ? PORTAL_PAGE + '#' + url : '';
+}
 
 // Trailers don't take the car route. Southbound trips always run through the NLEX Connector
 // (C-3 Road/5th Ave. to Magsaysay), then city streets to SLEX. Google Maps is made to pass these
@@ -305,7 +312,7 @@ function addPortalUser(brokerId, email) {
     else sh.appendRow(row);
     try { CacheService.getScriptCache().remove('pfail_' + email); } catch (e) { /* fine */ }
     var mailed = sendPortalInvite_(email, temp, broker.v[1], !!found);
-    return { email: email, tempPassword: temp, mailed: mailed, users: portalUsersOf_(brokerId) };
+    return { email: email, tempPassword: temp, mailed: mailed, link: portalLink_(), users: portalUsersOf_(brokerId) };
   });
 }
 function removePortalUser(email) {
@@ -323,7 +330,7 @@ function portalUsersOf_(brokerId) {
 // The sign-in email, from the admin's own account (the team app runs as the person using it)
 function sendPortalInvite_(email, temp, brokerName, isReset) {
   var who = signatory_();
-  var url = String(settings_().portal_url || '').trim();
+  var url = portalLink_();
   var lines = [
     'Hello,',
     '',
@@ -335,7 +342,8 @@ function sendPortalInvite_(email, temp, brokerName, isReset) {
     '  Temporary password: ' + temp,
     url ? '  Portal link: ' + url : '  Portal link: (ask ' + (who.company || '2C Trucking') + ' for the link)',
     '',
-    'You will be asked to choose your own password the first time you sign in.',
+    'Open the link, sign in, and you will be asked to choose your own password the first time.',
+    'On a phone you can add the portal to your home screen: Chrome shows an "Install app" button; in Safari use Share, then "Add to Home Screen".',
     '',
     'Regards,',
     who.company || '2C Trucking'

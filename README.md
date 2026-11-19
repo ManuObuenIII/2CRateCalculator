@@ -73,6 +73,13 @@ proposal only (no internal cost sheet, settings, saved proposals or other broker
 `setFaviconUrl` at the raw GitHub URL of the 192 px file, so it shows in the browser tab and when the app
 is added to a phone's home screen. If the repo moves, update `FAVICON_URL` in `Code.gs`.
 
+## GitHub Pages: brokerage portal page
+
+`portal/index.html` is the same installable shell for brokerages. It has no fixed app address: the sign-in email
+links to `https://manuobueniii.github.io/2CRateCalculator/portal/#<portal deployment URL>` (built by `portalLink_()`
+in `Code.gs` from Settings → Brokerage portal link). The page keeps that address on the device, so the installed
+app and later visits open the portal without the link.
+
 ## GitHub Pages
 
 `index.html` is an installable web-app shell for GitHub Pages (https://manuobueniii.github.io/2CRateCalculator/):

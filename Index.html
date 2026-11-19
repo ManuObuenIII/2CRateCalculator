@@ -3555,7 +3555,9 @@
           if (b) b.portalUsers = r.users;
           document.getElementById('portalUsers').innerHTML = portalUsersHtml(b || { id: brokerId, portalUsers: r.users });
           document.getElementById('puNote').innerHTML = '<div class="auto-note"><b>' + esc(r.email) + '</b> can now sign in. Temporary password: <b>' + esc(r.tempPassword) + '</b>'
-            + (r.mailed ? '<br>It has been emailed to them with the portal link.' : '<br><b>The email could not be sent</b> — give them this password yourself.') + '</div>';
+            + (r.mailed ? '<br>It has been emailed to them with the portal link.' : '<br><b>The email could not be sent</b> — give them this password yourself.')
+            + (r.link ? '<br>Portal link: <a class="review-link" href="' + esc(r.link) + '" target="_blank" rel="noopener">' + esc(r.link) + '</a>'
+                      : '<br><b>No portal link yet:</b> paste the portal deployment URL into Settings → Brokerage portal link, so the email can include it.') + '</div>';
           renderBrokerAdmin();
         })
         .withFailureHandler(bcFailed(btn, 'Add user'))

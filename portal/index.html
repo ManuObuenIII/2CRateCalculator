@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>2C Calculator · Brokerage portal</title>
+  <meta name="description" content="2C Trucking trailer rate calculator">
+  <link rel="icon" href="../assets/favicon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="../assets/icon-512.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#D93126">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="2C Portal">
+  <style>
+    :root { --red: #D93126; --ink: #17191D; --soft: #6B7079; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--ink);
+      background: linear-gradient(160deg, #fff5f4 0%, #ffffff 45%, #fde9e7 100%); }
+    /* The calculator fills the window; the landing card shows until it has loaded */
+    #app { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; opacity: 0; transition: opacity .3s; }
+    #app.on { opacity: 1; }
+    #splash { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; transition: opacity .3s; }
+    #splash.off { opacity: 0; pointer-events: none; }
+    .card { width: min(100%, 440px); padding: 40px 32px; text-align: center; background: rgba(255,255,255,.85);
+      border: 1px solid rgba(217,49,38,.15); border-radius: 24px; box-shadow: 0 24px 60px rgba(23,25,29,.10); }
+    .logo { width: 150px; height: auto; display: block; margin: 0 auto 18px; }
+    h1 { margin: 0 0 6px; font-size: 30px; font-weight: 400; font-family: Georgia, "Times New Roman", serif; }
+    h1 em { font-style: italic; color: var(--red); }
+    p { margin: 0 0 20px; color: var(--soft); font-size: 14px; line-height: 1.5; }
+    .btn { display: inline-block; padding: 14px 28px; background: var(--red); color: #fff; text-decoration: none; font-weight: 700;
+      border-radius: 999px; box-shadow: 0 8px 20px rgba(217,49,38,.28); border: 0; font: inherit; font-weight: 700; cursor: pointer; }
+    .btn:hover { background: #bf281e; }
+    .btn.alt { margin-top: 10px; background: #fff; color: var(--red); border: 1.5px solid var(--red); box-shadow: none; }
+    .btn.alt:hover { background: #fff5f4; }
+    .small { margin: 18px 0 0; font-size: 12px; }
+    .small a { color: var(--red); }
+    .spin { width: 22px; height: 22px; margin: 0 auto 14px; border: 3px solid #f3d4d1; border-top-color: var(--red); border-radius: 50%; animation: s 1s linear infinite; }
+    @keyframes s { to { transform: rotate(360deg); } }
+    /* small "open in browser" escape hatch, for when Google sign-in refuses to work inside the app window */
+    #out { position: fixed; right: 10px; bottom: 10px; z-index: 5; padding: 8px 12px; font-size: 12px; color: var(--soft);
+      background: rgba(255,255,255,.9); border: 1px solid rgba(23,25,29,.12); border-radius: 999px; text-decoration: none; opacity: 0; transition: opacity .3s; }
+    #out.on { opacity: 1; }
+    #out:hover { color: var(--red); }
+  </style>
+</head>
+<body>
+  <iframe id="app" title="2C Calculator" allow="clipboard-write; geolocation" referrerpolicy="no-referrer-when-downgrade"></iframe>
+  <a id="out" href="#" target="_blank" rel="noopener">Open in browser ↗</a>
+
+  <div id="splash">
+    <main class="card">
+      <img class="logo" src="../assets/icon-512.png" alt="2C Trucking">
+      <h1>2C <em>Calculator</em></h1><p style="margin:-2px 0 14px;font-size:13px;color:#D93126;font-weight:700;letter-spacing:.08em;text-transform:uppercase">Brokerage portal</p>
+      <div class="spin" id="spin"></div>
+      <p id="lead">Loading the brokerage portal…</p>
+      <button class="btn alt" id="install" hidden type="button">Install app</button>
+      <p class="small"><a id="openLink" href="#" target="_blank" rel="noopener">Open in the browser instead</a> · <a href="https://github.com/ManuObuenIII/2CRateCalculator">Source code</a></p>
+    </main>
+  </div>
+
+  <script>
+    // The portal's Apps Script address comes from the sign-in email link (after the #) and is remembered on this
+    // device, so the installed app and later visits open without it.
+    var APP_URL = '';
+    try {
+      var fromLink = /^#(https:\/\/script\.google\.com\/[^\s]+)$/.exec(location.hash || '');
+      if (fromLink) { APP_URL = fromLink[1]; try { localStorage.setItem('2c_portal_app', APP_URL); } catch (e) {} }
+      if (!APP_URL) APP_URL = localStorage.getItem('2c_portal_app') || '';
+    } catch (e) { /* storage off: the link must carry the address */ }
+    var app = document.getElementById('app'), splash = document.getElementById('splash'), lead = document.getElementById('lead');
+    var ua = navigator.userAgent;
+    var standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
+      || /[?&]source=app/.test(location.search);
+    // Safari / iPhone / iPad and in-app browsers (Messenger, Facebook, Instagram, Viber, Line) block Google's sign-in
+    // cookies inside an embedded frame (Google answers "401 malformed"), so there the calculator opens as its own page.
+    var ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var inApp = /FBAN|FBAV|FB_IAB|Messenger|Instagram|Viber|Line\/|MicroMessenger|Snapchat|Twitter/i.test(ua);
+    var safari = /Safari/.test(ua) && !/Chrome|CriOS|Chromium|Edg|Android/.test(ua);
+    var embed = !(ios || inApp || safari);
+
+    document.getElementById('out').href = APP_URL || '#';
+    document.getElementById('openLink').href = APP_URL || '#';
+    if (!APP_URL) {
+      document.getElementById('spin').hidden = true;
+      lead.innerHTML = 'Open the portal from the link in your sign-in email from 2C Trucking (it carries the portal address). If you have lost it, ask 2C Trucking to send it again.';
+      embed = false;
+    }
+    var shown = false;
+    function showApp() {
+      if (shown) return;
+      shown = true;
+      app.classList.add('on');
+      splash.classList.add('off');
+      document.getElementById('out').classList.add('on');
+    }
+    if (!APP_URL) {
+      // nothing to open yet
+    } else if (embed) {
+      app.addEventListener('load', showApp);
+      app.src = APP_URL;
+      setTimeout(showApp, 6000);   // still waiting after 6 s: show the frame anyway (it may be asking for sign-in)
+    } else if (standalone) {
+      location.replace(APP_URL);   // installed on iPhone: go straight to the calculator
+    } else {
+      document.getElementById('spin').hidden = true;
+      lead.innerHTML = inApp
+        ? 'Open this page in Safari or Chrome to install it (tap the … menu, then "Open in browser").'
+        : (ios ? 'To install: tap the <b>Share</b> button in Safari, then <b>Add to Home Screen</b>. Or open the calculator now.'
+               : 'Open the calculator, or install it from the browser menu.');
+      var open = document.createElement('a');
+      open.className = 'btn'; open.href = APP_URL; open.textContent = 'Open 2C Calculator';
+      lead.parentNode.insertBefore(open, lead.nextSibling);
+    }
+
+    // Install button (Chrome / Edge / Android); Safari on iPhone uses Share → Add to Home Screen
+    var deferred = null;
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      if (ios) return;   // iPhone/iPad install via Share → Add to Home Screen
+      deferred = e;
+      document.getElementById('install').hidden = false;
+    });
+    document.getElementById('install').addEventListener('click', function () {
+      if (!deferred) return;
+      deferred.prompt();
+      deferred.userChoice.then(function () { deferred = null; document.getElementById('install').hidden = true; });
+    });
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
+    window.addEventListener('hashchange', function () { location.reload(); });   // a new sign-in link opened on the same tab
+  </script>
+</body>
+</html>
