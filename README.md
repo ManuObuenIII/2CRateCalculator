@@ -29,7 +29,8 @@ Set in `Code.gs`:
 1. **Rate card** (client-facing): basic rate (covers the first N km, per brokerage or standard) +
    variable (excess km × bracket ₱/km) + fuel surcharge (excess km × round-trip multiplier ÷ bracket
    km/L × diesel price above the benchmark).
-2. **Trip cost** (internal): fuel, maintenance (fixed + per round-trip km), driver (matrix), tolls, other.
+2. **Trip cost** (internal): fuel, maintenance (fixed + per round-trip km), yard in/out (yard km × 2 ÷ yard km/L × diesel,
+   plus the yard toll × 2; all in Settings), driver (matrix), tolls, other.
 3. **Target net income**: the rate card is billed in full. When it would earn less than the target
    net income %, a **rate adjustment** tops it up to the target (folded into the basic rate on the
    client proposal, itemised on the internal sheet). No discount is given when it earns more.

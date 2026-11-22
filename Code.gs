@@ -139,6 +139,9 @@ var SETTING_DEFS = [
   ['vat_rate', 'VAT (%)', 12, 'number', ''],
   ['maint_fixed', 'Maintenance, fixed per trip (PHP)', 750, 'number', 'Added once to every trip\'s internal cost'],
   ['maint_per_km', 'Maintenance per km (PHP)', 10, 'number', 'Times the full round-trip distance, including the km covered by the base rate'],
+  ['yard_km', 'Yard in/out distance, one way (km)', 15, 'number', 'Trucks enter and leave the yard on every trip, so this is counted twice (back and forth)'],
+  ['yard_km_per_liter', 'Yard in/out fuel efficiency (km/L)', 1, 'number', 'Liters = yard km × 2 ÷ this, at the diesel price used for the proposal'],
+  ['yard_toll', 'Yard in/out toll, one way (PHP)', 254, 'number', 'Counted twice (back and forth). 0 = no toll'],
   ['validity_days', 'Proposal validity (days)', 15, 'number', 'Valid until = proposal date + this many days'],
   ['terms', 'Terms and conditions', DEFAULT_TERMS, 'textarea', 'Printed on the client proposal, one term per line'],
   ['proposal_folder_id', 'Shared Drive folder ID for proposal PDFs', '', 'text', 'Blank = each person\'s own Drive'],
@@ -591,7 +594,17 @@ function calculate_(data) {
   var maintFixed = settingNum_('maint_fixed', 750);
   var maintPerKm = settingNum_('maint_per_km', 10);
   var maintCost = maintFixed + roundTripKm * maintPerKm;
-  var totalExpenses = totalFuelCost + maintCost + driverSalary + tollFee + additionalExpenses;
+  // Yard in/out: trucks enter and leave the yard on every trip. Distance and toll are counted back and forth,
+  // fuel at the yard km/L and the proposal's diesel price (all in Settings).
+  var yardKm = settingNum_('yard_km', 15);
+  var yardKmPerLiter = settingNum_('yard_km_per_liter', 1);
+  var yardTollOneWay = settingNum_('yard_toll', 254);
+  var yardRoundKm = yardKm * 2;
+  var yardLiters = yardKmPerLiter > 0 ? yardRoundKm / yardKmPerLiter : 0;
+  var yardFuelCost = yardLiters * fuelPrice;
+  var yardToll = yardTollOneWay * 2;
+  var yardCost = yardFuelCost + yardToll;
+  var totalExpenses = totalFuelCost + maintCost + yardCost + driverSalary + tollFee + additionalExpenses;
 
   // ---- Billed rate: rate card ----
   var brokerRate = brokerBaseRate_(data.brokerId);
@@ -662,6 +675,14 @@ function calculate_(data) {
     maintFixed: maintFixed,
     maintPerKm: maintPerKm,
     maintCost: maintCost,
+    yardKm: yardKm,
+    yardRoundKm: yardRoundKm,
+    yardKmPerLiter: yardKmPerLiter,
+    yardLiters: yardLiters,
+    yardFuelCost: yardFuelCost,
+    yardTollOneWay: yardTollOneWay,
+    yardToll: yardToll,
+    yardCost: yardCost,
     driverSalary: driverSalary,
     driverBracket: driverMatch.bracket,
     tollFee: tollFee,
@@ -2697,7 +2718,7 @@ function saveToDatabase(record, pdfs) {
       '',                                // J  (helper, removed)
       record.tollFee,                    // K
       record.additionalExpenses,         // L
-      record.totalExpenses,              // M  includes maintenance
+      record.totalExpenses,              // M  includes maintenance and yard in/out
       record.adminCost,                  // N
       record.maintCost,                  // O  maintenance cost (fixed + round trip km × ₱/km)
       record.netIncome,                  // P
@@ -2862,7 +2883,7 @@ function recordForSheet_(record) {
 }
 
 // Called by the Proposals tab: recalculates every current proposal (not ones replaced by a revision) with
-// today's Masterlist, driver rate matrix, brokerage base rates, maintenance settings and this week's diesel
+// today's Masterlist, driver rate matrix, brokerage base rates, maintenance and yard settings and this week's diesel
 // price. The saved distance, route, tolls, other expenses, admin %, target % and tax type are kept.
 // The figures and the stored proposal are updated in place; the saved PDFs are cleared, since they no longer
 // match (Download PDF makes a fresh one from the updated proposal).
@@ -2900,7 +2921,8 @@ function readjustProposals() {
       for (var k in old) rec[k] = old[k];
       // Everything that comes from the rates and prices is refreshed; the route, dates and identity stay
       ['podKm', 'roundTripKm', 'kmPerLiter', 'fuelConsumption', 'fuelPrice', 'fuelPriceDate', 'fuelCost', 'maintFixed', 'maintPerKm',
-       'maintCost', 'driverSalary', 'driverBracket', 'totalExpenses', 'adminCost', 'netIncome', 'netIncomePctActual', 'grossProfit',
+       'maintCost', 'yardKm', 'yardRoundKm', 'yardKmPerLiter', 'yardLiters', 'yardFuelCost', 'yardTollOneWay', 'yardToll',
+       'yardCost', 'driverSalary', 'driverBracket', 'totalExpenses', 'adminCost', 'netIncome', 'netIncomePctActual', 'grossProfit',
        'grossProfitPct', 'targetRate', 'rateCard', 'cardRate', 'discount', 'adjustment', 'adjustmentPct', 'grossRate', 'taxAmount',
        'finalRate', 'vatRate', 'terms', 'signatory'].forEach(function (key) { if (fresh[key] !== undefined) rec[key] = fresh[key]; });
       rec.adjustedAt = stamp;

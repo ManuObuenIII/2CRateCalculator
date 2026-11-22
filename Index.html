@@ -2392,6 +2392,7 @@
       h += row(r.maintFixed !== undefined
         ? 'Maintenance (' + fmt(r.maintFixed) + ' fixed + ' + num(r.roundTripKm, 1) + ' km full round trip, base-rate km included, × ' + fmt(r.maintPerKm) + '/km)'
         : 'Maintenance (' + num(r.roundTripKm, 1) + ' km round trip × ' + fmt(r.maintPerKm) + '/km)', fmt(r.maintCost));
+      if (r.yardCost !== undefined) h += yardCostHtml(r);
       h += row('Driver (matrix ' + esc(r.driverBracket) + ')', fmt(r.driverSalary));
       h += tollCostHtml(r);
       h += row('Other expenses', fmt(r.additionalExpenses));
@@ -2541,7 +2542,8 @@
         + '<table class="review-grid">'
         + '<tr><td class="k">Billed rate</td><td class="v"><b>' + fmt(r.grossRate / rt) + '</b> per km</td></tr>'
         + '<tr><td class="k">Direct cost</td><td class="v"><b>' + fmt(r.totalExpenses / rt) + '</b> per km (fuel ' + fmt(r.fuelCost / rt)
-        + ', maintenance ' + fmt(r.maintCost / rt) + ', driver ' + fmt(r.driverSalary / rt) + ')</td></tr>'
+        + ', maintenance ' + fmt(r.maintCost / rt) + (r.yardCost ? ', yard in/out ' + fmt(r.yardCost / rt) : '')
+        + ', driver ' + fmt(r.driverSalary / rt) + ')</td></tr>'
         + '<tr><td class="k">Net income</td><td class="v"><b>' + fmt(r.netIncome / rt) + '</b> per km</td></tr>'
         + '</table>';
 
@@ -2549,7 +2551,7 @@
       var total = Number(r.totalExpenses) || 0;
       if (total > 0) {
         h += '<div class="review-sub">Where the trip cost goes (' + fmt(total) + ')</div>';
-        [['Fuel', r.fuelCost], ['Driver', r.driverSalary], ['Maintenance', r.maintCost], ['Tolls', r.tollFee], ['Other', r.additionalExpenses]]
+        [['Fuel', r.fuelCost], ['Driver', r.driverSalary], ['Maintenance', r.maintCost], ['Yard in/out', r.yardCost], ['Tolls', r.tollFee], ['Other', r.additionalExpenses]]
           .filter(function (c) { return Number(c[1]) > 0; })
           .sort(function (a, b) { return b[1] - a[1]; })
           .forEach(function (c) { h += mixRow(c[0], pct(c[1] / total), c[1] / total); });
@@ -3000,6 +3002,13 @@
     }
 
     // Internal cost sheet: toll line with the route worked out underneath
+    // Yard in/out: trucks enter and leave the yard on every trip (distance and toll counted back and forth)
+    function yardCostHtml(r) {
+      var f = 'Fuel: ' + num(r.yardKm, 1) + ' km × 2 = ' + num(r.yardRoundKm, 1) + ' km ÷ ' + r.yardKmPerLiter + ' km/L = '
+        + num(r.yardLiters, 1) + ' L × ' + fmt(r.fuelPrice) + ' = <b>' + fmt(r.yardFuelCost) + '</b>'
+        + '<br>Toll: ' + fmt(r.yardTollOneWay) + ' × 2 = <b>' + fmt(r.yardToll) + '</b>';
+      return lineItem('Yard in/out (back and forth)', f, fmt(r.yardCost));
+    }
     function tollCostHtml(r) {
       var route = r.tollRoute || [];
       if (!route.length) return row('Toll fees (round trip)', fmt(r.tollFee));
@@ -5231,7 +5240,7 @@
     var SETTING_GROUPS = [
       ['Company and sign-off', ['company_name', 'signatory_name', 'signatory_title']],
       ['Rate card', ['standard_base_rate', 'covered_km', 'fuel_benchmark', 'distance_multiplier', 'vat_rate']],
-      ['Trip cost (internal)', ['maint_fixed', 'maint_per_km']],
+      ['Trip cost (internal)', ['maint_fixed', 'maint_per_km', 'yard_km', 'yard_km_per_liter', 'yard_toll']],
       ['Proposals', ['validity_days', 'terms']],
       ['Google Drive (optional)', ['proposal_folder_id', 'agreements_folder_id']],
       ['Team', ['team_emails']]
