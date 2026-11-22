@@ -2729,11 +2729,13 @@
     }
 
     // Pasig-area trips go through one of two corridors; each is offered with its tolls
+    // Metro Manila trips: R-10 to the Harbor Link, exit at C-3 Road, then C-3 (Sgt. Rivera St, Araneta Ave)
+    var C3_SUGG = { corridor: 'c3', title: 'Via C-3',
+      segs: [{ x: 'NLEX Harbor Link', a: 'R-10/Port of Manila', b: 'Harbor Link Interchange' }],
+      note: 'R-10 to the Harbor Link, exit C-3 Road, then C-3 (Sgt. Rivera St, Araneta Ave) and roads trucks may use' };
     var PASIG_CORRIDOR_SUGG = [
-      // Metro Manila trips don't use the NLEX Connector or Osmeña Highway (those are for long hauls south)
-      { corridor: 'direct', title: 'Direct city route',
-        segs: [],
-        note: 'Roads trucks may use: off EDSA, ban-hour roads avoided where possible, MMDA truck routes if needed; no tolls' },
+      // Metro Manila trips run on C-3 via the Harbor Link; no NLEX Connector or Osmeña Highway (those are for long hauls south)
+      C3_SUGG,
       { corridor: 'mindanao', title: 'Via Mindanao Avenue',
         segs: [{ x: 'NLEX Harbor Link', a: 'R-10/Port of Manila', b: 'Karuhatan/Valenzuela' }, { x: 'NLEX/SCTEX', a: 'Karuhatan', b: 'Mindanao Ave.' }],
         note: 'Harbor Link and NLEX to Mindanao Ave., then Mindanao Avenue and C-5' }
@@ -2747,8 +2749,8 @@
     function buildSuggestions(dir) {
       if (dir === 'metro') {
         var here = currentAddress();
-        if (!TOLLS || !(isPasigArea(here) || isHarborArea(here))) return [];
-        return (isHarborArea(here) ? HARBOR_SUGG : PASIG_CORRIDOR_SUGG).map(function (c) {
+        if (!TOLLS) return [];
+        return (isHarborArea(here) ? HARBOR_SUGG : isPasigArea(here) ? PASIG_CORRIDOR_SUGG : [C3_SUGG]).map(function (c) {
           var ow = 0, bk = 0, ok = true;
           c.segs.forEach(function (s) { var v = segOneWay(s); if (v === null) ok = false; else { ow += v; bk += segBack(s); } });
           return ok ? { corridor: c.corridor, title: c.title, note: c.note, segs: c.segs, oneWay: ow, back: bk } : null;
@@ -2879,7 +2881,7 @@
       if (sg && sg.corridor) return sg.corridor;
       if (tollDir !== 'metro') return '';
       if (isHarborArea(currentAddress())) return 'harbor';
-      return isPasigArea(currentAddress()) ? 'auto' : '';
+      return isPasigArea(currentAddress()) ? 'auto' : 'c3';
     }
 
     // ----- direction -----
