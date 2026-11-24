@@ -40,7 +40,15 @@ var NORTHBOUND_VIA_LABEL = 'R-10 and Harbor Link to NLEX (Karuhatan)';
 var C3_VIA = ['Radial Road 10, Navotas, Metro Manila', 'C-3 Road, Caloocan, Metro Manila',
               'Sergeant Rivera Street, Quezon City, Metro Manila', 'Gregorio Araneta Avenue, Quezon City, Metro Manila'];
 var C3_LABEL = 'R-10, Harbor Link (exit C-3 Road) and C-3 (Sgt. Rivera St, Araneta Ave)';
+// Eastern Metro Manila (San Juan, Mandaluyong, Makati, Pasig, Marikina, Taguig, Pateros) and Rizal: the Port Area
+// truck route through San Marcelino St (Ayala Blvd → San Marcelino → Quirino Ave), then roads trucks may use. No toll roads.
+var SAN_MARCELINO_VIA = ['San Marcelino Street, Ermita, Manila, Metro Manila'];
+var SAN_MARCELINO_LABEL = 'San Marcelino St (Port Area truck route)';
 var PASIG_CORRIDORS = {
+  sanmarcelino: {
+    via: SAN_MARCELINO_VIA,
+    label: SAN_MARCELINO_LABEL
+  },
   c3: {
     via: C3_VIA,
     label: C3_LABEL
@@ -56,13 +64,14 @@ var PASIG_CORRIDORS = {
     label: 'R-10 and Harbor Link (exit Karuhatan)'
   }
 };
-var PASIG_AUTO_CORRIDORS = ['c3', 'mindanao'];   // what 'auto' compares for the Pasig area
+var PASIG_AUTO_CORRIDORS = ['c3', 'mindanao'];   // what 'auto' compares (Quezon City)
 
 // ---------- METRO MANILA TRUCK RULES (MMDA truck ban) ----------
 // Every route is checked against these. Check MMDA advisories for changes and edit here.
 // 1. EDSA, Magallanes to North Ave: closed to cargo trucks Monday to Saturday (EDSA_BAN_BOX below). Never used.
-// 2. Ban-hour roads: closed to trucks during TRUCK_BAN_HOURS. Metro Manila trips run on C-3 (C3_VIA above); when a
-//    route still uses one of these roads, the cost sheet says to travel outside those hours.
+// 2. Ban-hour roads: closed to trucks during TRUCK_BAN_HOURS. Metro Manila trips run on C-3 (C3_VIA above), eastern
+//    cities and Rizal through San Marcelino St (SAN_MARCELINO_VIA); when a route uses one of these roads, the cost
+//    sheet says to travel outside those hours.
 // 3. Business districts with their own delivery windows: flagged when the destination is inside.
 // [name, regex on Google's step text, [south, west, north, east] box the stretch lies in]
 var TRUCK_BAN_HOURS = '6–10 AM and 5–10 PM, Monday to Saturday (not Sundays or holidays)';

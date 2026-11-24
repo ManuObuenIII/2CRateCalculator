@@ -68,13 +68,15 @@ EDSA (Magallanes–North Ave) is never used; the ban-hour roads (España/Quezon 
 Blvd, E. Rodriguez, South Superhighway/Nagtahan, Taft, Bonifacio Dr/Roxas Blvd/NAIA Rd, Rizal Ave, Reina
 Regente/Abad Santos; 6–10 AM and 5–10 PM Mon–Sat) are flagged on the cost sheet, which says to travel outside the
 ban hours. Metro Manila trips run on C-3: R-10 → Harbor Link (exit C-3 Road) → C-3 (Sgt. Rivera St, Araneta Ave),
-then roads trucks may use (`C3_VIA`). Makati CBD, Ortigas and BGC deliveries are flagged. Edit the lists there when MMDA rules change.
+then roads trucks may use (`C3_VIA`). Eastern cities (San Juan, Mandaluyong, Makati, Pasig, Marikina, Taguig, Pateros)
+and Rizal go through San Marcelino St, the Port Area truck route, with no toll roads (`SAN_MARCELINO_VIA`). Makati CBD, Ortigas and BGC deliveries are flagged. Edit the lists there when MMDA rules change.
 
 ## Notes
 
 - Route rules for trailers: southbound via the NLEX Connector (C-3 → Magsaysay); northbound via
-  R-10 → Harbor Link (Karuhatan); Metro Manila via the Harbor Link (exit C-3 Road) and C-3, with the Pasig area also
-  offered the Mindanao Ave corridor (Metro Manila never uses the NLEX Connector or Osmeña); Malabon /
+  R-10 → Harbor Link (Karuhatan); Metro Manila via the Harbor Link (exit C-3 Road) and C-3; eastern cities and Rizal
+  via San Marcelino St; Quezon City compares C-3 with the Mindanao Ave corridor (Metro Manila never uses the NLEX
+  Connector or Osmeña); Malabon /
   Valenzuela / Caloocan via the Harbor Link (exit Karuhatan); EDSA (Magallanes–North Ave) is avoided.
 - Address data: PSGC via github.com/bendlikeabamboo/barangay (MIT).
 

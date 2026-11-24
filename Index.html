@@ -2730,18 +2730,20 @@
       document.getElementById('submitBtn').click();
     }
 
-    // Pasig-area trips go through one of two corridors; each is offered with its tolls
+    // Metro Manila corridors, each offered with its tolls (see buildSuggestions for which area gets which)
     // Metro Manila trips: R-10 to the Harbor Link, exit at C-3 Road, then C-3 (Sgt. Rivera St, Araneta Ave)
     var C3_SUGG = { corridor: 'c3', title: 'Via C-3',
       segs: [{ x: 'NLEX Harbor Link', a: 'R-10/Port of Manila', b: 'Harbor Link Interchange' }],
       note: 'R-10 to the Harbor Link, exit C-3 Road, then C-3 (Sgt. Rivera St, Araneta Ave) and roads trucks may use' };
-    var PASIG_CORRIDOR_SUGG = [
-      // Metro Manila trips run on C-3 via the Harbor Link; no NLEX Connector or Osmeña Highway (those are for long hauls south)
-      C3_SUGG,
-      { corridor: 'mindanao', title: 'Via Mindanao Avenue',
-        segs: [{ x: 'NLEX Harbor Link', a: 'R-10/Port of Manila', b: 'Karuhatan/Valenzuela' }, { x: 'NLEX/SCTEX', a: 'Karuhatan', b: 'Mindanao Ave.' }],
-        note: 'Harbor Link and NLEX to Mindanao Ave., then Mindanao Avenue and C-5' }
-    ];
+    var MINDANAO_SUGG = { corridor: 'mindanao', title: 'Via Mindanao Avenue',
+      segs: [{ x: 'NLEX Harbor Link', a: 'R-10/Port of Manila', b: 'Karuhatan/Valenzuela' }, { x: 'NLEX/SCTEX', a: 'Karuhatan', b: 'Mindanao Ave.' }],
+      note: 'Harbor Link and NLEX to Mindanao Ave., then Mindanao Avenue and C-5' };
+    // Eastern cities and Rizal: the Port Area truck route through San Marcelino St, no toll roads
+    var SAN_MARCELINO_SUGG = { corridor: 'sanmarcelino', title: 'Via San Marcelino St', segs: [],
+      note: 'Port Area truck route through San Marcelino St, then roads trucks may use' };
+    // Metro Manila trips run on C-3 via the Harbor Link; no NLEX Connector or Osmeña Highway (those are for long hauls south)
+    var PASIG_CORRIDOR_SUGG = [C3_SUGG, MINDANAO_SUGG];                       // Quezon City
+    var EAST_CORRIDOR_SUGG = [SAN_MARCELINO_SUGG, C3_SUGG, MINDANAO_SUGG];   // eastern cities and Rizal
     var HARBOR_SUGG = [
       { corridor: 'harbor', title: 'Via Harbor Link',
         segs: [{ x: 'NLEX Harbor Link', a: 'R-10/Port of Manila', b: 'Karuhatan/Valenzuela' }],
@@ -2752,7 +2754,8 @@
       if (dir === 'metro') {
         var here = currentAddress();
         if (!TOLLS) return [];
-        return (isHarborArea(here) ? HARBOR_SUGG : isPasigArea(here) ? PASIG_CORRIDOR_SUGG : [C3_SUGG]).map(function (c) {
+        return (isHarborArea(here) ? HARBOR_SUGG : isEastArea(here) ? EAST_CORRIDOR_SUGG
+          : isPasigArea(here) ? PASIG_CORRIDOR_SUGG : [C3_SUGG]).map(function (c) {
           var ow = 0, bk = 0, ok = true;
           c.segs.forEach(function (s) { var v = segOneWay(s); if (v === null) ok = false; else { ow += v; bk += segBack(s); } });
           return ok ? { corridor: c.corridor, title: c.title, note: c.note, segs: c.segs, oneWay: ow, back: bk } : null;
@@ -2830,8 +2833,13 @@
         return;
       }
       if (tollDir === 'metro') {
-        box.innerHTML = '<div class="toll-msg">Pasig area or Rizal: pick the corridor the trailer takes. '
-          + 'The distance follows the corridor you pick.</div>' + suggCards();
+        var here = currentAddress();
+        var msg = isHarborArea(here) ? 'Malabon, Valenzuela or Caloocan: R-10 and the Harbor Link, exit Karuhatan.'
+          : isEastArea(here) ? 'Eastern Metro Manila or Rizal: the trailer goes through San Marcelino St (Port Area truck route). '
+            + 'Pick another corridor only if the trip needs it; the distance follows the corridor you pick.'
+          : isPasigArea(here) ? 'Quezon City: pick the corridor the trailer takes. The distance follows the corridor you pick.'
+          : 'Metro Manila: R-10 and the Harbor Link (exit C-3 Road), then C-3.';
+        box.innerHTML = '<div class="toll-msg">' + msg + '</div>' + suggCards();
         return;
       }
       if (!destLoc) {
@@ -2877,13 +2885,16 @@
       }).join('') + '</div>';
     }
 
-    // The corridor sent with the proposal: the picked suggestion, or 'auto' (shorter of the two) for Pasig-area trips
+    // The corridor sent with the proposal: the picked suggestion, otherwise the area's own route
+    // (San Marcelino St for eastern cities and Rizal, 'auto' = C-3 or Mindanao Ave for Quezon City, else C-3)
     function currentCorridor() {
       var sg = appliedSugg >= 0 ? tollSuggestions[appliedSugg] : null;
       if (sg && sg.corridor) return sg.corridor;
       if (tollDir !== 'metro') return '';
-      if (isHarborArea(currentAddress())) return 'harbor';
-      return isPasigArea(currentAddress()) ? 'auto' : 'c3';
+      var here = currentAddress();
+      if (isHarborArea(here)) return 'harbor';
+      if (isEastArea(here)) return 'sanmarcelino';
+      return isPasigArea(here) ? 'auto' : 'c3';
     }
 
     // ----- direction -----
@@ -3256,6 +3267,14 @@
     // Full 10-digit PSGC code (a code saved as a number loses its leading 0)
     function psgc(code) { var s = String(code || '').replace(/\D/g, ''); return s ? ('0000000000' + s).slice(-10) : ''; }
     function isHarborArea(a) { return !!a && HARBOR_AREA_CODES.indexOf(psgc(a.cityCode)) >= 0; }
+    // Eastern cities (San Juan, Mandaluyong, Makati, Pasig, Marikina, Taguig, Pateros) and all of Rizal:
+    // through San Marcelino St (Port Area truck route)
+    var EAST_AREA_CODES = ['1381400000', '1380500000', '1380300000', '1381200000', '1380700000', '1381500000', '1381701000'];
+    function isEastArea(a) {
+      if (!a) return false;
+      var code = psgc(a.cityCode);
+      return EAST_AREA_CODES.indexOf(code) >= 0 || code.indexOf('04058') === 0;
+    }
 
     function isPasigArea(a) {
       if (!a) return false;
