@@ -12,6 +12,7 @@ sheet as PDFs, saves proposals to Drive and a sheet, emails proposals, and expor
 | `Index.html` | The web app page: calculator, proposals, dashboard, masterlist, brokerages & clients, driver rate matrix, diesel price, settings |
 | `Logo.html` | The 2C Trucking logo (base64), pulled into the page |
 | `Signature.html` | The CEO's signature image (base64) printed on client proposals |
+| `RouteSeed.gs` | Starting data for the 2C Truck Route Database (routes, destination assignments, island barangays). Used once, to create the routing sheets |
 | `PlacesData.html` | Philippine provinces, cities/municipalities and barangays (PSGC, gzipped + base64) for the address dropdowns |
 | `appsscript.json` | Apps Script manifest: time zone, web app settings, OAuth scopes |
 
@@ -22,7 +23,33 @@ Set in `Code.gs`:
 - `SHEET_ID` – the **Proposals** spreadsheet (saved proposals, dispatch orders).
 - `DRIVER_MATRIX_ID` – the **rates and brokerages** spreadsheet. Tabs are created on first use:
   Settings, Masterlist, Driver Rate Matrix, Weekly Diesel Price, Toll Rates (Class 3), Brokers,
-  Clients, Client Addresses, Road Advisories.
+  Clients, Client Addresses, Road Advisories, and the truck route database: Destination Index,
+  Northbound Routes, Southbound Routes, Non-Expressway Routes, Prohibited Roads.
+
+## 2C Truck Route Database
+
+Coverage is mainland Luzon only (NCR, CAR, Regions I, II, III, IV-A and V), from Manila Port, for a 40-ft
+container tractor-trailer (Class 3). Everything below is edited in the sheets; the app reads them every 5 minutes.
+
+- **Destination Index**: one row per province, municipality and (where needed) barangay. Province rows
+  (City/Municipality blank) set the *Operational Group* and *Province Display Sequence* of the Province dropdown,
+  and the default route and coverage of their municipalities. Municipality rows override the province; barangay rows
+  override the municipality. *Service Coverage Status*: Served, For Review (selectable, flagged on the cost sheet) or
+  Not Served (hidden: island municipalities and barangays, places with no road access). Provinces not listed are not
+  offered (Visayas, Mindanao, Batanes, Mindoro, Marinduque, Palawan, Romblon, Catanduanes, Masbate).
+  *Assigned Route ID* is the fixed route; *Alternative Route IDs* add up to two more options.
+- **Northbound / Southbound / Non-Expressway Routes**: one row per route. *Waypoint Sequence* lists the stops in
+  order, separated by `>` (a place Google Maps can find, or `lat, lng`); stop 0 is Manila Port and the last stop is
+  the delivery address. Legs between the *Expressway Entry* and *Exit* stops may use toll roads; every other leg is
+  looked up toll-free, so Google cannot take the Skyway, NAIAX or another toll road there (`D` as the exit = toll
+  roads allowed to the address). *Toll Segments (Class 3)* are what the toll is charged on, with names as in the
+  toll sheet (`Expressway: Entry > Exit; …`). *Route Approval Status*: Approved, Proposed (usable, flagged on the
+  cost sheet) or Suspended (not used; the destination is flagged for Operations review).
+- **Prohibited Roads**: matched against Google's step descriptions (Skyway, NAIAX, Kennon Road, Olalia Road,
+  Daang Pari, ferries). A route that uses one is flagged as non-compliant on the cost sheet.
+- In the calculator the delivery address picks its assigned route automatically (option 1); options 2 and 3 can be
+  chosen instead. The map, distance and tolls follow the chosen route.
+- Run `testRouteDb` once from the Apps Script editor to create the sheets and check that every Route ID exists.
 
 ## How the rate is computed
 
@@ -38,7 +65,8 @@ Set in `Code.gs`:
 
 ## Deploying
 
-1. In the Apps Script project, replace each file with the copy here (file names must match).
+1. In the Apps Script project, replace each file with the copy here (file names must match; add any that are
+   missing, e.g. `RouteSeed.gs` with **+ → Script**).
    Keep `appsscript.json` as is (enable *Show "appsscript.json" manifest file in editor* in
    Project Settings to see it).
 2. **Deploy → Manage deployments → Edit → New version → Deploy.**

@@ -504,7 +504,8 @@ function brokerData_(row) {
 // What a brokerage may see of a calculation: the client proposal only (no costs, margins or route review)
 var BROKER_KEEP_ = ['truckType', 'pricingModel', 'validityDays', 'validUntil', 'terms', 'signatory', 'vatRate', 'status', 'source',
   'distance', 'podKm', 'distanceSource', 'routeVia', 'routeMap', 'mapImage', 'mapImageWide', 'fuelPrice', 'fuelPriceDate',
-  'rateCard', 'grossRate', 'taxType', 'taxAmount', 'finalRate', 'preparedBy', 'discount', 'adjustment', 'cardRate', 'metroCorridor', 'tollDirection'];
+  'rateCard', 'grossRate', 'taxType', 'taxAmount', 'finalRate', 'preparedBy', 'discount', 'adjustment', 'cardRate', 'metroCorridor', 'tollDirection',
+  'routeId', 'routeName'];
 function forBroker_(res, brokerName) {
   var out = {};
   BROKER_KEEP_.forEach(function (k) { if (res[k] !== undefined) out[k] = res[k]; });
@@ -562,6 +563,25 @@ function calculate_(data) {
 
   if (!dest) throw new Error("Destination is required.");
 
+  // Service coverage and the fixed truck route (Destination Index and route sheets)
+  var cover = null, dbRoute = null;
+  if (data.cityCode) {
+    cover = destRule_(data.cityCode, data.barangay);
+    if (cover.coverage === 'Not Served') {
+      throw new Error(dest + ' is outside the trucking service area' + (cover.land || cover.notes ? ' (' + (cover.land || cover.notes) + ')' : '')
+        + '. Deliveries needing a ferry or RORO crossing are arranged separately.');
+    }
+  }
+  var routeId = String(data.routeId || '').toUpperCase().trim();
+  if (routeId) {
+    dbRoute = routeDb_().routes[routeId] || null;
+    if (!dbRoute) throw new Error('Route ' + routeId + ' is not in the route sheets. Check the Assigned Route ID in the Destination Index.');
+    if (dbRoute.status === 'Suspended') {
+      throw new Error('Route ' + routeId + ' is suspended in the ' + dbRoute.sheet + ' sheet, so this destination is flagged for Operations review. '
+        + 'Pick another route option, or ask Operations to approve a route.');
+    }
+  }
+
   // Distance (one way): manual override wins, otherwise Google Maps
   var distanceSource = distanceOverride > 0 ? 'Manual' : 'Google Maps';
   var corridor = PASIG_CORRIDORS[data.metroCorridor] || data.metroCorridor === 'auto' ? data.metroCorridor : '';
@@ -570,7 +590,13 @@ function calculate_(data) {
           : (tollDirection === 'metro' ? C3_VIA : [])));
   var tollFree = corridor && corridor !== 'auto' ? PASIG_CORRIDORS[corridor].tollFree
           : (tollDirection === 'metro' ? PASIG_CORRIDORS.c3.tollFree : null);
+  var dbPlan = dbRoute ? dbRoutePlan_(dbRoute) : null;
   var findRoute = function (target) {
+    if (dbPlan) {
+      var fixed = getTruckRoute_(source, target, dbPlan.via, dbPlan.dir, dbPlan.tollFree);
+      if (fixed) fixed.target = target;
+      return fixed;
+    }
     if (corridor !== 'auto') {
       var one = getTruckRoute_(source, target, via, tollDirection, tollFree);
       if (one) one.target = target;
@@ -596,8 +622,12 @@ function calculate_(data) {
       route = findRoute(data.destinationArea);   // lot/landmark not found: use the city
     }
   }
+  if (dbRoute && !route && !(distanceOverride > 0)) {
+    throw new Error('Google Maps could not follow route ' + dbRoute.id + ' to this address. Check its waypoints in the ' + dbRoute.sheet
+      + ' sheet (each stop must be a place Google Maps can find, or "lat, lng"), pick another route option, or enter the distance by hand.');
+  }
   var distanceKm = distanceOverride > 0 ? distanceOverride : (route ? route.km : 0);
-  var routeVia = !route ? '' : (route.corridor ? PASIG_CORRIDORS[route.corridor].label
+  var routeVia = dbRoute ? dbRoute.name + ' (' + dbRoute.id + ')' : !route ? '' : (route.corridor ? PASIG_CORRIDORS[route.corridor].label
           : (tollDirection === 'south' ? SOUTHBOUND_VIA_LABEL : (tollDirection === 'north' ? NORTHBOUND_VIA_LABEL
           : (tollDirection === 'metro' ? C3_LABEL : ''))));
   var routeMap = route ? { polyline: route.polyline, detail: route.detail, start: route.start, end: route.end } : null;
@@ -685,6 +715,17 @@ function calculate_(data) {
     routeMap: routeMap,                      // saved with the proposal, small
     truckCheck: route ? route.truckCheck : '', // clear | alternative | detour | atgrade | edsa | skyway
     truckSkyway: route ? (route.skywayOff ? 'off' : (route.skyway ? 'parallel' : 'none')) : '',
+    truckProhibited: route ? (route.prohibited || []) : [],
+    routeId: dbRoute ? dbRoute.id : '',
+    routeName: dbRoute ? dbRoute.name : '',
+    routeCorridor: dbRoute ? dbRoute.corridor : '',
+    routeStatus: dbRoute ? dbRoute.status : '',
+    routeRoads: dbRoute ? dbRoute.roads : '',
+    routeCont: dbRoute ? dbRoute.cont : '',
+    routeStops: dbRoute ? dbRoute.stops : [],
+    routeNotes: dbRoute ? dbRoute.notes : '',
+    destCoverage: cover ? cover.coverage : '',
+    destCoverageNote: cover ? (cover.notes || cover.land) : '',
     truckDetour: route ? (route.detour || '') : '',
     truckWindowRoads: route ? (route.window || []) : [],       // ban-hour roads the route still uses
     truckBanHours: TRUCK_BAN_HOURS,
@@ -1629,11 +1670,16 @@ function saveAddress(a) {
     var places = JSON.parse(getPlaces());
     var city = null;
     for (var i = 0; i < places.cities.length; i++) if (places.cities[i][0] === a.cityCode) city = places.cities[i];
-    if (!city) throw new Error('Choose the city or municipality.');
+    if (!city) {
+      var all = getPlacesData_().c.filter(function (c) { return c[0] === a.cityCode; })[0];
+      if (all) throw new Error(all[1] + ' is outside the trucking service area (sea crossing or no road access). '
+        + 'Deliveries needing a ferry or RORO are arranged separately.');
+      throw new Error('Choose the city or municipality.');
+    }
     var province = '';
     places.provinces.forEach(function (p) { if (p[0] === city[2]) province = p[1]; });
     var barangay = clean_(a.barangay);
-    if (barangay && getBarangays(city[0]).indexOf(barangay) < 0) throw new Error('That barangay is not in ' + city[1] + '. Choose it from the list, or leave it blank.');
+    if (barangay && getBarangays(city[0]).indexOf(barangay) < 0) throw new Error('That barangay is not in ' + city[1] + ' or is outside the trucking service area. Choose it from the list, or leave it blank.');
     var rec = { line: clean_(a.line, 200), barangay: barangay, city: city[1], province: province };
     var full = composeAddress_(rec);
     var sh = addressesSheet_();
@@ -1675,13 +1721,34 @@ function getPlacesData_() {
 }
 
 // Called by the app: provinces and cities/municipalities for the address dropdowns (JSON text).
+// Only what the Destination Index serves: provinces in display order under their Operational Group, and the
+// municipalities that are not "Not Served". cities: [code, name, province key, 'R' when For Review].
 function getPlaces() {
   var cache = CacheService.getScriptCache();
-  var hit = cache.get('places_v1');
+  var hit = cache.get('places_v2');
   if (hit) return hit;
   var d = getPlacesData_();
-  var json = JSON.stringify({ version: d.v, provinces: d.p, cities: d.c });
-  try { cache.put('places_v1', json, 21600); } catch (e) { /* too big for the cache: fine, just slower */ }
+  var db = routeDb_();
+  var groups = [], groupOf = {}, provinces = [];
+  db.provinces.forEach(function (key) {
+    var p = db.prov[key];
+    if (p.c === 'Not Served') return;
+    var name = '';
+    for (var i = 0; i < d.p.length; i++) if (d.p[i][0] === key) name = d.p[i][1];
+    if (!name) return;
+    if (!groupOf[p.g]) { groupOf[p.g] = [p.g, []]; groups.push(groupOf[p.g]); }
+    groupOf[p.g][1].push(key);
+    provinces.push([key, name, p.g]);
+  });
+  var served = {};
+  provinces.forEach(function (p) { served[p[0]] = db.prov[p[0]]; });
+  var cities = d.c.filter(function (c) { return served[c[2]]; }).map(function (c) {
+    var rec = db.city[c[0]];
+    var cov = (rec && rec.c) || served[c[2]].c;
+    return cov === 'Not Served' ? null : [c[0], c[1], c[2], cov === 'For Review' ? 'R' : ''];
+  }).filter(Boolean);
+  var json = JSON.stringify({ version: d.v, provinces: provinces, groups: groups, cities: cities });
+  try { cache.put('places_v2', json, 300); } catch (e) { /* too big for the cache: fine, just slower */ }
   return json;
 }
 
@@ -1690,11 +1757,18 @@ function getBarangays(cityCode) {
   var cache = CacheService.getScriptCache();
   var key = 'brgy_' + cityCode;
   var hit = cache.get(key);
-  if (hit) return hit.split('|');
+  if (hit) return servedBarangays_(cityCode, hit.split('|'));
   var list = String(getPlacesData_().b[cityCode] || '');
   if (!list) return [];
   try { cache.put(key, list, 21600); } catch (e) { /* fine without the cache */ }
-  return list.split('|');
+  return servedBarangays_(cityCode, list.split('|'));
+}
+// Drops barangays the Destination Index marks Not Served (island barangays)
+function servedBarangays_(cityCode, list) {
+  var db;
+  try { db = routeDb_(); } catch (e) { return list; }
+  var code = psgc_(cityCode);
+  return list.filter(function (b) { var r = db.brgy[code + '|' + b.toLowerCase()]; return !(r && r.c === 'Not Served'); });
 }
 
 // RUN THIS from the Apps Script editor to check the address list (select testPlaces, then Run).
@@ -1704,6 +1778,299 @@ function testPlaces() {
   for (var k in d.b) count += d.b[k].split('|').length;
   Logger.log('Address list OK (PSGC ' + d.v + '): ' + d.p.length + ' provinces, ' + d.c.length
     + ' cities/municipalities, ' + count + ' barangays.');
+}
+
+// ---------- 2C TRUCK ROUTE DATABASE (driver matrix spreadsheet; editable without changing the code) ----------
+// "Destination Index": which provinces, municipalities and barangays are served, and the fixed route of each.
+//   Province rows (City/Municipality blank) set the Operational Group and Province Display Sequence of the Province
+//   dropdown, and the default route and coverage of their municipalities. A municipality row overrides its province;
+//   a barangay row overrides its municipality (used for island barangays). Service Coverage Status:
+//   Served | For Review (selectable, flagged on the cost sheet) | Not Served (hidden from the dropdowns).
+//   Provinces that are not listed are not offered at all (Visayas, Mindanao, island provinces).
+// "Northbound Routes", "Southbound Routes", "Non-Expressway Routes": one row per route. Waypoint Sequence = the stops in
+//   order, separated by " > " (a place Google Maps can find, or "lat, lng"). Stop 0 is Manila Port, the last stop is the
+//   delivery address. Legs between the Expressway Entry and Exit stops may use toll roads; every other leg is looked
+//   up toll-free, which keeps Google off the Skyway, NAIAX and other toll roads. Exit "D" = toll roads allowed up to
+//   the delivery address. Toll Segments are what the Class 3 toll is charged on (names as in the toll sheet).
+//   Route Approval Status: Approved | Proposed (usable, flagged on the cost sheet) | Suspended (not used).
+// "Prohibited Roads": roads a route must never use, matched against Google's step descriptions.
+// The app reads these sheets every 5 minutes (cached).
+var DEST_TAB = 'Destination Index';
+var DEST_HEAD = ['Official Region', 'Operational Group', 'Province', 'Province Display Sequence', 'City/Municipality',
+  'City Code (PSGC)', 'Barangay', 'Land Accessibility', 'Service Coverage Status', 'Assigned Route ID', 'Alternative Route IDs', 'Notes'];
+var ROUTE_TABS = ['Northbound Routes', 'Southbound Routes', 'Non-Expressway Routes'];
+var ROUTE_HEAD = ['Route ID', 'Route Name', 'Corridor', 'Direction', 'Mandatory Roads', 'Waypoint Sequence', 'Expressway Entry Stop #',
+  'Expressway Exit Stop #', 'Toll Segments (Class 3)', 'Entry Toll Plaza', 'Exit Toll Plaza', 'Continuing Highway', 'Conditional Roads',
+  'Truck-Ban Schedule', 'Height Restriction', 'Weight Restriction', 'Route Approval Status', 'Approved By', 'Last Updated Date', 'Notes'];
+var PROHIBITED_TAB = 'Prohibited Roads';
+var PROHIBITED_HEAD = ['Road', 'Match Words (as Google Maps names the road, comma-separated)', 'Status', 'Notes'];
+var PROHIBITED_SEED = [
+  ['Skyway Stage 1, 2 and 3 (elevated) and their ramps', 'Skyway', 'Prohibited',
+   'Ground-level Osmeña Highway and SLEX are allowed. Google steps on the Skyway right above Osmeña Hwy / SLEX (Quirino Ave to Alabang) are noted on the cost sheet, since the at-grade road below is the same distance.'],
+  ['NAIA Expressway (NAIAX) and its ramps', 'NAIA Expressway, NAIAX, NAIA Expy', 'Prohibited', 'Ground-level NAIA Road is allowed.'],
+  ['Kennon Road', 'Kennon', 'Prohibited', 'Baguio deliveries use Marcos Highway.'],
+  ['Olalia Road (Antipolo)', 'Olalia', 'Prohibited', 'Excluded from automatic routing pending verification of truck restrictions.'],
+  ['Daang Pari (Antipolo)', 'Daang Pari', 'Prohibited', 'Excluded from automatic routing pending verification of truck restrictions.'],
+  ['Ferry and RORO crossings', 'ferry, RoRo', 'Prohibited', 'Sea crossings are outside the trucking service; they need separate domestic shipping.']
+];
+var COVERAGE_LIST = ['Served', 'For Review', 'Not Served'];
+var LAND_LIST = ['Road', 'Bridge-connected island', 'Island (sea crossing)', 'No road access'];
+var ROUTE_STATUS_LIST = ['Approved', 'Proposed', 'Suspended'];
+var ROUTE_DB_MEMO_ = null;
+
+function officialRegion_(provKey) {
+  if (provKey === 'NCR') return 'NCR';
+  return ({ '01': 'Region I', '02': 'Region II', '03': 'Region III', '04': 'Region IV-A', '05': 'Region V', '14': 'CAR' })[String(provKey).slice(0, 2)] || '';
+}
+
+// "NLEX Harbor Link: R-10/Port of Manila > Karuhatan/Valenzuela; NLEX/SCTEX: Karuhatan > Balagtas" → [{ x, a, b }]
+function parseSegs_(text) {
+  return String(text || '').split(';').map(function (part) {
+    var i = part.indexOf(':');
+    if (i < 0) return null;
+    var ab = part.slice(i + 1).split('>');
+    if (ab.length !== 2) return null;
+    var s = { x: part.slice(0, i).trim(), a: ab[0].trim(), b: ab[1].trim() };
+    return s.x && s.a && s.b ? s : null;
+  }).filter(Boolean);
+}
+function splitIds_(text) {
+  return String(text || '').split(/[,;\s]+/).map(function (s) { return s.trim().toUpperCase(); }).filter(Boolean);
+}
+function normCoverage_(v) {
+  var s = String(v || '').toLowerCase();
+  if (/not|no |exclud/.test(s)) return 'Not Served';
+  if (/review|pending|check/.test(s)) return 'For Review';
+  return s ? 'Served' : '';
+}
+function normRouteStatus_(v) {
+  var s = String(v || '').toLowerCase();
+  if (/suspend|inactive|disable|reject/.test(s)) return 'Suspended';
+  if (/approv|active/.test(s)) return 'Approved';
+  return 'Proposed';
+}
+function normDir_(v) {
+  var s = String(v || '').toLowerCase();
+  return /south/.test(s) ? 'south' : (/north/.test(s) ? 'north' : 'metro');
+}
+// Expressway entry/exit stop: a number, or "D" for the delivery address
+function stopNum_(v) {
+  var s = String(v || '').trim();
+  if (/^d/i.test(s)) return 'D';
+  var n = parseInt(s, 10);
+  return n > 0 ? n : 0;
+}
+
+// Writes a seeded table: plain-text cells, bold frozen header, optional dropdowns { columnIndex: [values] }
+function writeSeedTable_(sh, head, rows, lists, widths) {
+  var n = Math.max(rows.length + 1, 2);
+  if (sh.getMaxRows() < n + 50) sh.insertRowsAfter(sh.getMaxRows(), n + 50 - sh.getMaxRows());
+  if (sh.getMaxColumns() < head.length) sh.insertColumnsAfter(sh.getMaxColumns(), head.length - sh.getMaxColumns());
+  sh.getRange(1, 1, sh.getMaxRows(), head.length).setNumberFormat('@');
+  sh.getRange(1, 1, 1, head.length).setValues([head]).setFontWeight('bold').setWrap(true);
+  if (rows.length) sh.getRange(2, 1, rows.length, head.length).setValues(rows);
+  sh.setFrozenRows(1);
+  Object.keys(lists || {}).forEach(function (c) {
+    var rule = SpreadsheetApp.newDataValidation().requireValueInList(lists[c], true).setAllowInvalid(true).build();
+    sh.getRange(2, Number(c) + 1, sh.getMaxRows() - 1, 1).setDataValidation(rule);
+  });
+  (widths || []).forEach(function (w, i) { if (w) sh.setColumnWidth(i + 1, w); });
+}
+
+// Creates any routing sheet that is missing, from RouteSeed.gs. Existing sheets are never overwritten.
+function seedRouteDb_() {
+  var ss = dmSs_();
+  var today = dateKey_(new Date());
+  ROUTE_TABS.forEach(function (name) {
+    if (ss.getSheetByName(name)) return;
+    var rows = ROUTE_SEED.filter(function (r) { return r[0] === name; }).map(function (r) {
+      var segs = parseSegs_(r[9]);
+      return [r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], segs.length ? segs[0].a : '', segs.length ? segs[segs.length - 1].b : '',
+              r[10], r[11], r[12], '', '', 'Proposed', '', today, r[13]];
+    });
+    writeSeedTable_(ss.insertSheet(name), ROUTE_HEAD, rows, { 3: ['Metro', 'North', 'South'], 16: ROUTE_STATUS_LIST },
+      [150, 260, 190, 70, 280, 420, 90, 90, 360, 130, 130, 220, 220, 220, 100, 100, 110, 120, 110, 300]);
+  });
+  if (!ss.getSheetByName(PROHIBITED_TAB)) {
+    writeSeedTable_(ss.insertSheet(PROHIBITED_TAB), PROHIBITED_HEAD, PROHIBITED_SEED, { 2: ['Prohibited', 'Inactive'] }, [300, 260, 100, 480]);
+  }
+  if (!ss.getSheetByName(DEST_TAB)) {
+    var places = getPlacesData_();
+    var keyOf = {};
+    places.p.forEach(function (p) { keyOf[p[1]] = p[0]; });
+    var rows = [];
+    DEST_PROVINCE_SEED.forEach(function (p) {
+      var key = keyOf[p[0]];
+      if (!key) return;
+      var region = officialRegion_(key);
+      rows.push([region, p[1], p[0], String(p[2]), '', '', '', 'Road', p[5], p[3], p[4], 'Province row: sets the group, order, default route and coverage']);
+      places.c.filter(function (c) { return c[2] === key; }).forEach(function (c) {
+        var o = DEST_CITY_SEED[p[0] + '|' + c[1]];
+        rows.push([region, '', p[0], '', c[1], c[0], '', (o && o[3]) || 'Road', (o && o[2]) || p[5],
+                   o ? o[0] : p[3], o ? o[1] : p[4], (o && o[4]) || '']);
+        DEST_BARANGAY_SEED.filter(function (b) { return b[0] === p[0] && b[1] === c[1]; }).forEach(function (b) {
+          rows.push([region, '', p[0], '', c[1], c[0], b[2], b[3], b[4], '', '', b[5]]);
+        });
+      });
+    });
+    var sh = ss.insertSheet(DEST_TAB);
+    writeSeedTable_(sh, DEST_HEAD, rows, { 7: LAND_LIST, 8: COVERAGE_LIST },
+      [100, 260, 150, 90, 190, 110, 170, 150, 120, 170, 230, 330]);
+    sh.getRange(1, 2).setNote('Set on the province row (City/Municipality blank). Municipalities follow their province.');
+    sh.getRange(1, 4).setNote('Set on the province row. The Province dropdown lists provinces in this order, under their Operational Group.');
+    sh.getRange(1, 10).setNote('A Route ID from the Northbound, Southbound or Non-Expressway Routes sheet. Blank on a municipality = the province\'s route.');
+    sh.getRange(1, 11).setNote('Up to two more Route IDs, comma-separated, offered as options 2 and 3.');
+  }
+}
+
+// The whole routing database, cached for 5 minutes:
+// { provinces: [key…] in dropdown order, prov: { key: rec }, city: { code: rec }, brgy: { 'code|name': rec },
+//   routes: { id: route }, prohibited: [{ road, words }], urls }
+function routeDb_() {
+  if (ROUTE_DB_MEMO_) return ROUTE_DB_MEMO_;
+  var cache = CacheService.getScriptCache();
+  var hit = cache.getAll(['routedb_dest_v1', 'routedb_routes_v1']);
+  if (hit.routedb_dest_v1 && hit.routedb_routes_v1) {
+    try {
+      var a = JSON.parse(hit.routedb_dest_v1), b = JSON.parse(hit.routedb_routes_v1);
+      for (var k in b) a[k] = b[k];
+      ROUTE_DB_MEMO_ = a;
+      return a;
+    } catch (e) { /* rebuild */ }
+  }
+  seedRouteDb_();
+  var ss = dmSs_();
+  var places = getPlacesData_();
+  var provKey = {}, cityCode = {};
+  places.p.forEach(function (p) { provKey[p[1].toLowerCase()] = p[0]; });
+  places.c.forEach(function (c) { cityCode[c[2] + '|' + c[1].toLowerCase()] = c[0]; });
+  var t = function (v) { return String(v === null || v === undefined ? '' : v).replace(/\s+/g, ' ').trim(); };
+  var dest = { provinces: [], prov: {}, city: {}, brgy: {}, urls: {} };
+  var sh = ss.getSheetByName(DEST_TAB);
+  dest.urls.dest = ss.getUrl() + '#gid=' + sh.getSheetId();
+  sh.getDataRange().getDisplayValues().slice(1).forEach(function (r) {
+    var key = provKey[t(r[2]).toLowerCase()];
+    if (!key) return;
+    var name = t(r[4]), code = t(r[5]).replace(/\D/g, ''), brgy = t(r[6]);
+    var rec = { c: normCoverage_(r[8]), l: t(r[7]), r: t(r[9]).toUpperCase(), a: splitIds_(r[10]), n: t(r[11]) };
+    if (!name && !code) {
+      rec.g = t(r[1]) || 'OTHER DESTINATIONS';
+      rec.s = Number(t(r[3])) || 999;
+      rec.c = rec.c || 'Served';
+      if (!dest.prov[key]) dest.provinces.push(key);
+      dest.prov[key] = rec;
+      return;
+    }
+    code = code ? ('0000000000' + code).slice(-10) : cityCode[key + '|' + name.toLowerCase()];
+    if (!code) return;
+    rec.p = key;
+    if (brgy) dest.brgy[code + '|' + brgy.toLowerCase()] = rec;
+    else dest.city[code] = rec;
+  });
+  dest.provinces.sort(function (x, y) { return dest.prov[x].s - dest.prov[y].s; });
+  var rt = { routes: {}, prohibited: [], routeUrls: {} };
+  ROUTE_TABS.forEach(function (name) {
+    var rs = ss.getSheetByName(name);
+    if (!rs) return;
+    rt.routeUrls[name] = ss.getUrl() + '#gid=' + rs.getSheetId();
+    rs.getDataRange().getDisplayValues().slice(1).forEach(function (r) {
+      var id = t(r[0]).toUpperCase();
+      if (!id) return;
+      rt.routes[id] = { id: id, name: t(r[1]), corridor: t(r[2]), dir: normDir_(r[3]), roads: t(r[4]),
+        stops: String(r[5] || '').split('>').map(t).filter(Boolean), entry: stopNum_(r[6]), exit: stopNum_(r[7]),
+        segs: parseSegs_(r[8]), cont: t(r[11]), cond: t(r[12]), ban: t(r[13]), height: t(r[14]), weight: t(r[15]),
+        status: normRouteStatus_(r[16]), approvedBy: t(r[17]), updated: t(r[18]), notes: t(r[19]), sheet: name };
+    });
+  });
+  var ps = ss.getSheetByName(PROHIBITED_TAB);
+  (ps ? ps.getDataRange().getDisplayValues().slice(1) : PROHIBITED_SEED).forEach(function (r) {
+    if (!t(r[0]) || /inactive|allow/i.test(t(r[2]))) return;
+    var words = String(r[1] || '').split(',').map(t).filter(Boolean);
+    if (words.length) rt.prohibited.push({ road: t(r[0]), words: words });
+  });
+  try { cache.putAll({ routedb_dest_v1: JSON.stringify(dest), routedb_routes_v1: JSON.stringify(rt) }, 300); } catch (e) { /* fine without */ }
+  for (var k2 in rt) dest[k2] = rt[k2];
+  ROUTE_DB_MEMO_ = dest;
+  return dest;
+}
+
+// Coverage and fixed route of one delivery point: barangay row → municipality row → province row
+function destRule_(cityCode, barangay) {
+  var db = routeDb_();
+  var code = psgc_(cityCode);
+  var c = db.city[code] || null;
+  var b = barangay ? db.brgy[code + '|' + String(barangay).toLowerCase().replace(/\s+/g, ' ').trim()] || null : null;
+  var provKeyOf = c ? c.p : (b ? b.p : null);
+  if (!provKeyOf) {
+    var places = getPlacesData_();
+    for (var i = 0; i < places.c.length; i++) if (places.c[i][0] === code) { provKeyOf = places.c[i][2]; break; }
+  }
+  var p = provKeyOf ? db.prov[provKeyOf] || null : null;
+  if (!p) return { coverage: 'Not Served', land: '', notes: 'Province outside the trucking service area', route: '', alts: [] };
+  var pick = b && b.r ? b : (c && c.r ? c : p);
+  return {
+    coverage: (b && b.c) || (c && c.c) || p.c || 'Served',
+    land: (b && b.l) || (c && c.l) || '',
+    notes: (b && b.n) || (c && c.n) || '',
+    route: pick.r, alts: pick.a || []
+  };
+}
+
+// Called by the app: the routing database for the route options (JSON text)
+function getRouteDb() {
+  var db = routeDb_();
+  return JSON.stringify({ provinces: db.provinces, prov: db.prov, city: db.city, brgy: db.brgy, routes: db.routes,
+                          urls: { dest: db.urls.dest, routes: db.routeUrls } });
+}
+
+// Google route for a database route: stop 0 = Manila Port, 1…n = waypoints, n + 1 = delivery address.
+// Leg i (stop i → stop i + 1) may use toll roads only between the expressway entry and exit stops.
+function dbRoutePlan_(route) {
+  var n = route.stops.length;
+  var entry = route.entry, exit = route.exit === 'D' ? n + 1 : route.exit;
+  var tolled = entry > 0 && exit > entry;
+  return {
+    via: route.stops.slice(),
+    dir: route.dir,
+    tollFree: { always: true, free: function (i) { return !(tolled && i >= entry && i < exit); } }
+  };
+}
+
+// Prohibited roads Google's route uses (Skyway is checked separately by skywayUse_, ferries by the maneuver)
+function prohibitedUsed_(route) {
+  var list;
+  try { list = routeDb_().prohibited; } catch (e) {
+    list = PROHIBITED_SEED.map(function (r) { return { road: r[0], words: r[1].split(',').map(function (w) { return w.trim(); }) }; });
+  }
+  var hits = [];
+  (route.legs || []).forEach(function (leg) {
+    (leg.steps || []).forEach(function (st) {
+      var text = String(st.html_instructions || '').replace(/<[^>]+>/g, ' ');
+      var maneuver = String(st.maneuver || '');
+      list.forEach(function (p) {
+        if (hits.indexOf(p.road) >= 0) return;
+        if (p.words.some(function (w) { return /skyway/i.test(w); })) return;
+        var ferry = p.words.some(function (w) { return /ferry/i.test(w); }) && /ferry/i.test(maneuver);
+        var hit = ferry || p.words.some(function (w) {
+          return w && new RegExp('(^|[^A-Za-z])' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^A-Za-z]|$)', 'i').test(text);
+        });
+        if (hit) hits.push(p.road);
+      });
+    });
+  });
+  return hits;
+}
+
+// RUN THIS from the Apps Script editor to create and check the routing sheets (select testRouteDb, then Run).
+function testRouteDb() {
+  var db = routeDb_();
+  var ids = Object.keys(db.routes), missing = [];
+  var check = function (where, id) { if (id && !db.routes[id] && missing.indexOf(where + ' → ' + id) < 0) missing.push(where + ' → ' + id); };
+  db.provinces.forEach(function (k) { check(k, db.prov[k].r); db.prov[k].a.forEach(function (a) { check(k, a); }); });
+  Object.keys(db.city).forEach(function (c) { check(c, db.city[c].r); db.city[c].a.forEach(function (a) { check(c, a); }); });
+  Logger.log('Route database OK: ' + db.provinces.length + ' provinces, ' + Object.keys(db.city).length + ' municipalities, '
+    + Object.keys(db.brgy).length + ' barangay rows, ' + ids.length + ' routes, ' + db.prohibited.length + ' prohibited roads.'
+    + (missing.length ? '\nRoute IDs not found in the route sheets: ' + missing.join('; ') : ''));
 }
 
 // ---------- Weekly diesel price (shown in the app's "Diesel price" tab) ----------
@@ -1962,6 +2329,7 @@ function routeInfo_(r) {
     edsa: usesBannedEdsa_(r),
     skyway: sky.any,          // Google's route is on the Skyway somewhere
     skywayOff: sky.off,       // …outside the stretch right above Osmeña Highway / SLEX (a different road: not allowed)
+    prohibited: prohibitedUsed_(r),   // other prohibited roads (Prohibited Roads sheet): Kennon, NAIAX, ferries…
     window: windowRoadsUsed_(r),
     warnings: (r.warnings || []).filter(function (w) { return !/has tolls/i.test(w); }).slice(0, 5),
     driveMin: Math.round(seconds / 60),
@@ -1983,8 +2351,9 @@ function getRoute_(source, destination, via) {
 function getTruckRoute_(source, destination, via, dir, tollFree) {
   via = via || [];
   var points = [source].concat(via, [destination]);
+  var freeFn = tollFree && (tollFree.free || function (i) { return i >= tollFree.from; });
   var raw = tollFree && tollFree.always
-    ? [directionsPlan_(points, function (i) { return i >= tollFree.from; })]
+    ? [directionsPlan_(points, freeFn)]
     : directions_(source, destination, via, via.length === 0);
   var routes = raw.filter(Boolean).map(routeInfo_).filter(Boolean);
   if (!routes.length) return null;
@@ -1998,7 +2367,9 @@ function getTruckRoute_(source, destination, via, dir, tollFree) {
   var none = function () { return false; };
   // Toll-free legs that keep this trip off the Skyway (null when there is no sensible toll-free stretch)
   var offSkyway = null;
-  if (dir === 'south') {
+  if (tollFree && tollFree.free) {
+    // A route from the route sheets: its toll-free legs already keep it off the Skyway; only the EDSA detour is tried
+  } else if (dir === 'south') {
     points = [source].concat(via, [SOUTH_ATGRADE_JOIN], [destination]);
     offSkyway = { points: points, free: function (i) { return i === via.length; }, label: SOUTH_ATGRADE_LABEL };
   } else if (tollFree && !tollFree.always) {
@@ -2012,7 +2383,7 @@ function getTruckRoute_(source, destination, via, dir, tollFree) {
   var detour = TRUCK_DETOUR[dir];
   if (detour) {
     var dPoints = [source].concat(via, detour.via, [destination]);
-    tries.push({ points: dPoints, free: none, check: 'detour', label: detour.label });
+    tries.push({ points: dPoints, free: tollFree && tollFree.free ? freeFn : none, check: 'detour', label: detour.label });
     if (offSkyway && dir !== 'south') {
       tries.push({ points: dPoints, free: offSkyway.free, check: 'detour', label: detour.label });
     }
@@ -2027,13 +2398,13 @@ function getTruckRoute_(source, destination, via, dir, tollFree) {
     }
   }
   var fallback = best || routes[0];
-  fallback.truckCheck = fallback.edsa ? 'edsa' : 'skyway';
+  fallback.truckCheck = fallback.edsa ? 'edsa' : (fallback.skywayOff ? 'skyway' : 'prohibited');
   fallback.viaUsed = via;
   return fallback;
 }
 
 // A route trailers can take: off EDSA (Magallanes–North Ave) and off the Skyway (except right above the at-grade road)
-function truckOk_(r) { return !!r && !r.edsa && !r.skywayOff; }
+function truckOk_(r) { return !!r && !r.edsa && !r.skywayOff && !(r.prohibited && r.prohibited.length); }
 
 // Is Google's route on the Skyway? off = some of it is outside SKYWAY_ATGRADE_BOX (a road trailers can't follow)
 function skywayUse_(route) {

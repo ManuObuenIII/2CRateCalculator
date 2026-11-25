@@ -691,6 +691,9 @@
     .sg-route, .sg-meta { display: block; margin-top: 2px; font-size: 12px; line-height: 1.45; color: var(--ink-soft); }
     .sg-meta { color: var(--mist); }
     .sg-pill { display: inline-block; margin-left: 6px; padding: 1px 8px; font-size: 10.5px; font-weight: 700; color: #FFFFFF; background: var(--red); border-radius: 999px; vertical-align: 1px; }
+    .sg-pill.sg-status { color: #7A5200; background: #FFF1CC; }
+    .sg-pill.sg-ok { color: #0B5E41; background: #DDF3E8; }
+    .toll-msg .warn-line { display: block; margin-top: 4px; color: var(--caution, #B26B00); font-weight: 600; }
     .toll-seg {
       margin-bottom: 10px;
       padding: 12px;
@@ -1513,7 +1516,8 @@
             <div class="toll-block">
               <div class="toll-head">
                 <span class="toll-title">Tolls, Class 3 (trailer)</span>
-                <a id="tollSheetLink" class="toll-lookup" href="#" target="_blank" rel="noopener" hidden>Edit toll rates</a>
+                <span><a id="routeSheetLink" class="toll-lookup" href="#" target="_blank" rel="noopener" hidden style="margin-right:12px">Edit routes</a>
+                <a id="tollSheetLink" class="toll-lookup" href="#" target="_blank" rel="noopener" hidden>Edit toll rates</a></span>
               </div>
               <div id="tollSuggest"></div>
               <div id="tollSegments"></div>
@@ -1942,6 +1946,7 @@
     })();
     loadFuel();
     loadTolls();
+    loadRouteDb();
     loadBrokersClients();
     loadSettings(true);
 
@@ -2292,7 +2297,18 @@
       else if (r.truckCheck === 'atgrade') h = '<div class="route-map-cap">Truck route check: Google\'s route used the Skyway, which trailers do not use, so the trip was sent along '
         + esc(r.truckDetour || 'toll-free city streets') + ' instead.</div>';
       else if (r.truckCheck === 'skyway') h = '<div class="note warn-note">Check the route: Google Maps only found routes that use the Skyway, which trailers do not use. '
-        + 'Confirm the trailer route and enter the distance by hand if it differs.</div>';
+        + 'Confirm the trailer route and enter the distance by hand if it differs.' + (r.routeId ? ' Flagged for Operations review.' : '') + '</div>';
+      else if (r.truckCheck === 'prohibited') h = '<div class="note warn-note">Not a compliant route: Google\'s route uses '
+        + (r.truckProhibited || []).map(esc).join(', ') + ', which trailers must not use. This destination is flagged for Operations review: '
+        + 'fix the route\'s waypoints in the route sheets (or pick another route option) before sending a quotation.</div>';
+      if (r.routeId) {
+        h = '<div class="route-map-cap">Truck route <b>' + esc(r.routeId) + '</b> · ' + esc(r.routeName || '')
+          + (r.routeRoads ? ': ' + esc(r.routeRoads) : '') + (r.routeCont ? ', then ' + esc(r.routeCont) : '') + '.</div>' + h;
+        if (r.routeStatus && r.routeStatus !== 'Approved') h += '<div class="note warn-note">Route ' + esc(r.routeId)
+          + ' is proposed and not yet approved by Operations. Confirm it before sending the quotation.</div>';
+      }
+      if (r.destCoverage === 'For Review') h += '<div class="note warn-note">Destination flagged for Operations review'
+        + (r.destCoverageNote ? ': ' + esc(r.destCoverageNote) : '') + '.</div>';
       else if (r.truckCheck === 'truckroute') h = '<div class="route-map-cap">Truck route check: sent along the ' + esc(r.routeVia) + ', keeping off EDSA and the truck ban-hour roads.</div>';
       else if (r.truckCheck === 'detour') h = '<div class="route-map-cap">Truck route check: sent via ' + esc(r.truckDetour) + ' to stay off EDSA (' + ban + ')</div>';
       else if (r.truckCheck === 'edsa') h = '<div class="note warn-note">Check the route: Google Maps only found routes that use EDSA, where '
@@ -2569,6 +2585,9 @@
       var flags = [];
       if (r.truckCheck === 'edsa') flags.push('Google only found routes through EDSA. Check the distance against the actual trailer route.');
       if (r.truckCheck === 'skyway') flags.push('Google only found routes on the Skyway, which trailers do not use. Check the distance against the actual trailer route.');
+      if (r.truckCheck === 'prohibited') flags.push('The route uses ' + (r.truckProhibited || []).map(esc).join(', ') + ' (prohibited). Flagged for Operations review: do not send this quotation yet.');
+      if (r.routeStatus && r.routeStatus !== 'Approved') flags.push('Route ' + esc(r.routeId) + ' is not yet approved by Operations.');
+      if (r.destCoverage === 'For Review') flags.push('Destination flagged for Operations review' + (r.destCoverageNote ? ': ' + esc(r.destCoverageNote) : '') + '.');
       if (r.truckWindowRoads && r.truckWindowRoads.length) flags.push('The route uses ' + r.truckWindowRoads.length + ' truck ban-hour road' + (r.truckWindowRoads.length === 1 ? '' : 's') + ': travel outside ' + esc(r.truckBanHours || '6–10 AM and 5–10 PM, Monday to Saturday') + '.');
       if (r.truckDistrict) flags.push('Destination is in ' + esc(r.truckDistrict.name) + ': ' + esc(r.truckDistrict.rule) + '.');
       if (r.grossProfit < 0) flags.push('The billed rate does not cover the direct cost of this trip.');
@@ -2640,6 +2659,66 @@
     var tollLoadTimer = null;
     var tollSuggestions = [];
     var appliedSugg = -1;
+    // 2C Truck Route Database (Destination Index + route sheets): { provinces, prov, city, brgy, routes, urls }
+    var ROUTEDB = null;
+    var pickedRouteId = '';   // the route option picked for the current destination
+
+    function loadRouteDb() {
+      google.script.run
+        .withSuccessHandler(function (raw) {
+          try { ROUTEDB = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { ROUTEDB = null; }
+          var link = document.getElementById('routeSheetLink');
+          if (ROUTEDB && ROUTEDB.urls && ROUTEDB.urls.dest) { link.href = ROUTEDB.urls.dest; link.hidden = false; }
+          refreshSuggestions();
+          renderTolls();
+        })
+        .withFailureHandler(function (error) { toastError("Couldn't load the truck route database: " + error.message); })
+        .getRouteDb();
+    }
+
+    // Coverage and fixed route of a delivery address: barangay row → municipality row → province row
+    function destRuleFor(addr) {
+      if (!ROUTEDB || !addr) return null;
+      var code = psgc(addr.cityCode);
+      var c = ROUTEDB.city[code] || null;
+      var b = addr.barangay ? ROUTEDB.brgy[code + '|' + String(addr.barangay).toLowerCase().replace(/\s+/g, ' ').trim()] || null : null;
+      var pk = (c && c.p) || (b && b.p);
+      var p = pk ? ROUTEDB.prov[pk] : null;
+      if (!p) return { coverage: 'Not Served', route: '', alts: [], note: 'Province outside the trucking service area', land: '' };
+      var pick = b && b.r ? b : (c && c.r ? c : p);
+      return { route: pick.r, alts: pick.a || [], coverage: (b && b.c) || (c && c.c) || p.c || 'Served',
+               note: (b && b.n) || (c && c.n) || '', land: (b && b.l) || (c && c.l) || '' };
+    }
+
+    // Up to three route options (assigned route first) with their Class 3 tolls; suspended routes are left out
+    function routeOptionsFor(addr) {
+      var rule = destRuleFor(addr);
+      if (!rule) return null;
+      var ids = [rule.route].concat(rule.alts).filter(function (id, i, a) {
+        return id && a.indexOf(id) === i && ROUTEDB.routes[id] && ROUTEDB.routes[id].status !== 'Suspended';
+      }).slice(0, 3);
+      return ids.map(function (id, i) {
+        var r = ROUTEDB.routes[id];
+        var ow = 0, bk = 0, missing = [];
+        r.segs.forEach(function (sg) {
+          var v = TOLLS ? segOneWay(sg) : null;
+          if (v === null) { if (TOLLS) missing.push(sg.x + ': ' + sg.a + ' → ' + sg.b); }
+          else { ow += v; bk += segBack(sg); }
+        });
+        return { routeId: id, option: i + 1, assigned: id === rule.route, title: id + ' · ' + r.name, note: r.roads + (r.cont ? ', then ' + r.cont : ''),
+                 segs: r.segs, oneWay: ow, back: bk, missing: missing, status: r.status, dir: r.dir };
+      });
+    }
+
+    // The route sent with the proposal: the option picked for this destination, else the assigned route
+    function currentRouteId() {
+      var addr = currentAddress();
+      var opts = routeOptionsFor(addr) || [];
+      if (pickedRouteId && opts.some(function (o) { return o.routeId === pickedRouteId; })) return pickedRouteId;
+      if (opts.length) return opts[0].routeId;
+      var rule = destRuleFor(addr);
+      return rule && rule.route ? rule.route : '';
+    }
 
     function loadTolls() {
       tollLoadError = '';
@@ -2706,6 +2785,7 @@
       var dest = destGeoQuery();
       if (destLoc && destLoc.query === dest) return;   // same destination as before: keep the current tolls
       dirManual = false;
+      pickedRouteId = '';
       segSource = 'none';   // a new destination gets new suggested tolls
       tollSegs = [];
       appliedSugg = -1;
@@ -2760,6 +2840,8 @@
     ];
 
     function buildSuggestions(dir) {
+      var opts = routeOptionsFor(currentAddress());
+      if (opts && opts.length) return opts;
       if (dir === 'metro') {
         var here = currentAddress();
         if (!TOLLS) return [];
@@ -2800,7 +2882,8 @@
     // unless the toll route was edited by hand.
     function refreshSuggestions() {
       var addr = currentAddress();
-      var regionDir = addr ? clientDirection(addr) : '';
+      var opts = routeOptionsFor(addr);
+      var regionDir = opts && opts.length ? opts[0].dir : (addr ? clientDirection(addr) : '');
       if (!dirManual && regionDir) {
         setDir(regionDir, false, true);
       } else if (TOLLS && destLoc && destLoc.lat !== undefined && !dirManual) {
@@ -2810,8 +2893,11 @@
       }
       tollSuggestions = buildSuggestions(tollDir);
       appliedSugg = -1;
+      var picked = -1;
+      tollSuggestions.forEach(function (sg, i) { if (sg.routeId && sg.routeId === pickedRouteId) picked = i; });
+      if (segSource === 'manual' && picked >= 0) appliedSugg = picked;
       if (segSource !== 'manual') {
-        if (tollSuggestions.length) applySuggestion(0, true);
+        if (tollSuggestions.length) applySuggestion(picked >= 0 ? picked : 0, true);
         else if (segSource === 'suggest') { tollSegs = []; segSource = 'none'; updateTollTotal(); }
       }
       renderSuggestions();
@@ -2823,6 +2909,10 @@
       tollSegs = sg.segs.map(function (s) { return { x: s.x, a: s.a, b: s.b }; });
       segSource = 'suggest';
       appliedSugg = i;
+      if (sg.routeId) {
+        pickedRouteId = sg.routeId;
+        if (!dirManual && sg.dir && sg.dir !== tollDir) setDir(sg.dir, false, true);
+      }
       updateTollTotal();
       if (!quiet) { renderSuggestions(); renderTolls(); }
     }
@@ -2834,6 +2924,24 @@
         box.innerHTML = '<div class="toll-msg warn">Couldn\'t load the toll rates. ' + esc(tollLoadError)
           + ' <a href="#" class="toll-lookup" onclick="loadTolls(); renderSuggestions(); return false;">Try again</a>'
           + '<br>You can still type the toll fee below.</div>';
+        return;
+      }
+      var rAddr = BC ? currentAddress() : null, rule = destRuleFor(rAddr);   // BC is not set yet on the first call at page load
+      if (rule && rAddr && (rule.coverage === 'Not Served' || !rule.route)) {
+        box.innerHTML = '<div class="toll-msg warn">' + esc(rAddr.city) + ' is outside the trucking service area'
+          + (rule.land || rule.note ? ' (' + esc(rule.land || rule.note) + ')' : '') + '. Deliveries needing a ferry or RORO are arranged separately.</div>';
+        return;
+      }
+      if (tollSuggestions && tollSuggestions.length && tollSuggestions[0].routeId) {
+        var nOpt = tollSuggestions.length;
+        box.innerHTML = '<div class="toll-msg">Truck route for <b>' + esc(rAddr.city) + '</b>' + (rAddr.barangay ? ', ' + esc(rAddr.barangay) : '')
+          + ': the assigned route is first' + (nOpt > 1 ? ', then the approved alternatives' : '') + '. The map, distance and tolls follow the route you pick.'
+          + (rule.coverage === 'For Review' ? '<span class="warn-line">For Operations review: ' + esc(rule.note || 'this destination\'s route is not yet confirmed') + '</span>' : '')
+          + '</div>' + suggCards();
+        return;
+      }
+      if (rule && rAddr && rule.route && !(tollSuggestions && tollSuggestions.length)) {
+        box.innerHTML = '<div class="toll-msg warn">Every route for ' + esc(rAddr.city) + ' is suspended, so this destination is flagged for Operations review.</div>';
         return;
       }
       if (tollDir === 'metro' && !tollSuggestions.length) {
@@ -2881,11 +2989,16 @@
       suggKey = key;
       return '<div class="sugg-list' + (anim ? ' anim' : '') + '">' + tollSuggestions.map(function (sg, i) {
         var route = sg.segs.length ? sg.segs.map(function (s) { return esc(s.a) + ' → ' + esc(s.b) + ' (' + esc(s.x) + ')'; }).join(' · ') : 'No toll roads';
-        var meta = sg.corridor
+        var meta = sg.routeId
+          ? 'Round trip · ' + fmt(sg.oneWay) + ' one way · ' + esc(sg.note)
+            + (sg.missing && sg.missing.length ? ' · <b>No toll rate in the toll sheet for ' + esc(sg.missing.join('; ')) + '</b>' : '')
+          : sg.corridor
           ? 'Round trip · ' + fmt(sg.oneWay) + ' one way · ' + esc(sg.note)
           : 'Round trip · ' + fmt(sg.oneWay) + ' one way · exit about ' + num(sg.km, 0) + ' km from the destination' + (sg.note ? ' · ' + esc(sg.note) : '');
         return '<button type="button" class="sugg' + (i === appliedSugg ? ' active' : '') + '" onclick="applySuggestion(' + i + ')">'
-          + '<span class="sg-top"><span class="sg-name">' + esc(sg.title || 'Exit at ' + sg.exit)
+          + '<span class="sg-top"><span class="sg-name">' + (sg.routeId ? (sg.assigned ? 'Assigned: ' : 'Option ' + sg.option + ': ') : '')
+          + esc(sg.title || 'Exit at ' + sg.exit)
+          + (sg.routeId ? '<span class="sg-pill ' + (sg.status === 'Approved' ? 'sg-ok">Approved' : 'sg-status">Proposed') + '</span>' : '')
           + (i === appliedSugg ? '<span class="sg-pill">Selected</span>' : '') + '</span>'
           + '<span class="sg-amt">' + fmt(sg.oneWay + sg.back) + '</span></span>'
           + '<span class="sg-route">' + route + '</span>'
@@ -3391,7 +3504,7 @@
       var same = destLoc && destLoc.query === destGeoQuery();
       dirManual = false;
       locateDest();
-      if (same) { refreshSuggestions(); renderTolls(); }
+      if (same) { pickedRouteId = ''; segSource = 'none'; refreshSuggestions(); renderTolls(); }
     }
 
     // ----- Brokers & clients tab -----
@@ -3762,7 +3875,7 @@
           + '<div class="row">'
           + '<div class="col form-group"><label for="cfProv">Province</label><select id="cfProv" onchange="cfProvinceChanged()">'
           + option('', 'Choose province', !city)
-          + PLACES.provinces.map(function (p) { return option(p[0], p[1], city && city[2] === p[0]); }).join('')
+          + provinceOptionsHtml(city ? city[2] : '')
           + '</select></div>'
           + '<div class="col form-group"><label for="cfCity">City / Municipality</label>'
           + '<select id="cfCity" onchange="cfCityChanged()" disabled>' + option('', 'Choose the province first', true) + '</select></div>'
@@ -3778,12 +3891,24 @@
       });
     }
 
+    // Province dropdown: mainland Luzon provinces in trucking-corridor order, under non-selectable group headings
+    // (Destination Index sheet: Operational Group and Province Display Sequence)
+    function provinceOptionsHtml(selected) {
+      if (!PLACES.groups) return PLACES.provinces.map(function (p) { return option(p[0], p[1], selected === p[0]); }).join('');
+      var name = {};
+      PLACES.provinces.forEach(function (p) { name[p[0]] = p[1]; });
+      return PLACES.groups.map(function (g, i) {
+        return '<optgroup label="' + esc((i + 1) + '. ' + g[0]) + '">'
+          + g[1].map(function (key) { return option(key, name[key], selected === key); }).join('') + '</optgroup>';
+      }).join('');
+    }
+
     function cfProvinceChanged(keepCity, keepBrgy) {
       var prov = document.getElementById('cfProv').value;
       var sel = document.getElementById('cfCity');
       var list = PLACES.cities.filter(function (c) { return c[2] === prov; });
       sel.innerHTML = option('', prov ? 'Choose city or municipality' : 'Choose the province first', !keepCity)
-        + list.map(function (c) { return option(c[0], c[1], c[0] === keepCity); }).join('');
+        + list.map(function (c) { return option(c[0], c[1] + (c[3] === 'R' ? ' (for Operations review)' : ''), c[0] === keepCity); }).join('');
       sel.disabled = !prov;
       cfCityChanged(keepBrgy);
     }
@@ -4262,6 +4387,9 @@
         tollRoute: collectTollRoute(),
         tollDirection: tollDir,
         metroCorridor: currentCorridor(),
+        routeId: currentRouteId(),
+        cityCode: addr.cityCode || '',
+        barangay: addr.barangay || '',
         additionalExpenses: document.getElementById('additionalExpenses').value,
         adminPct: document.getElementById('adminPct').value,
         incomePct: document.getElementById('incomePct').value,
@@ -5089,6 +5217,7 @@
       document.getElementById('taxType').value = rec.taxType === 'VAT' ? 'VAT' : 'Non-VAT';
       // Look the destination up again, then put the saved toll route back so it is not replaced by a suggestion
       locateDest();
+      pickedRouteId = rec.routeId || '';
       if (rec.tollDirection) setDir(rec.tollDirection, true, true);
       tollSegs = (rec.tollRoute || []).map(function (sg) { return { x: sg.expressway, a: sg.entry, b: sg.exit }; });
       segSource = tollSegs.length ? 'manual' : 'none';
@@ -5218,6 +5347,9 @@
       var route = [];
       if (rec.truckCheck === 'edsa') route.push('<b>Check the route:</b> Google only found routes through EDSA (trucks are banned from Magallanes to North Ave.).');
       else if (rec.truckCheck === 'skyway') route.push('<b>Check the route:</b> Google only found routes on the Skyway.');
+      else if (rec.truckCheck === 'prohibited') route.push('<b>Check the route:</b> it uses ' + (rec.truckProhibited || []).map(esc).join(', ') + ', which trailers must not use.');
+      if (rec.routeId) route.unshift('<b>Truck route ' + esc(rec.routeId) + ':</b> ' + esc(rec.routeRoads || rec.routeName || '')
+        + (rec.routeCont ? ', then ' + esc(rec.routeCont) : '') + '.');
       else if (rec.truckCheck) route.push('Route stays off the EDSA truck ban' + (rec.truckSkyway ? ' and off the Skyway' : '') + (rec.truckDetour ? ' via ' + esc(rec.truckDetour) : '') + '.');
       if (rec.truckSkyway) route.push('<b>No Skyway:</b> trailers stay on the at-grade roads (Osmeña Highway, SLEX).');
       var tolls = rec.tollRoute || [];
