@@ -69,7 +69,10 @@ Blvd, E. Rodriguez, South Superhighway/Nagtahan, Taft, Bonifacio Dr/Roxas Blvd/N
 Regente/Abad Santos; 6–10 AM and 5–10 PM Mon–Sat) are flagged on the cost sheet, which says to travel outside the
 ban hours. Metro Manila trips run on C-3: R-10 → Harbor Link (exit C-3 Road) → C-3 (Sgt. Rivera St, Araneta Ave),
 then roads trucks may use (`C3_VIA`). Eastern cities (San Juan, Mandaluyong, Makati, Pasig, Marikina, Taguig, Pateros)
-and Rizal go through San Marcelino St, the Port Area truck route, with no toll roads (`SAN_MARCELINO_VIA`). Makati CBD, Ortigas and BGC deliveries are flagged. Edit the lists there when MMDA rules change.
+and Rizal go through San Marcelino St, the Port Area truck route, with no toll roads (`SAN_MARCELINO_VIA`).
+Trailers never use the Skyway: when Google's route takes it, the Metro Manila part is looked up toll-free (southbound:
+city streets from the NLEX Connector to Osmeña Highway, then SLEX). Skyway use right above Osmeña Highway / SLEX is
+kept with a note, since the at-grade road below is the same distance. Makati CBD, Ortigas and BGC deliveries are flagged. Edit the lists there when MMDA rules change.
 
 ## Notes
 

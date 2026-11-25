@@ -44,26 +44,40 @@ var C3_LABEL = 'R-10, Harbor Link (exit C-3 Road) and C-3 (Sgt. Rivera St, Arane
 // truck route through San Marcelino St (Ayala Blvd → San Marcelino → Quirino Ave), then roads trucks may use. No toll roads.
 var SAN_MARCELINO_VIA = ['San Marcelino Street, Ermita, Manila, Metro Manila'];
 var SAN_MARCELINO_LABEL = 'San Marcelino St (Port Area truck route)';
+// tollFree: trailers never use the Skyway. Legs from stop number `from` on (0 = Manila Port, 1 = the first via
+// point, …) are looked up toll-free, which keeps Google off the Skyway: always for San Marcelino (no toll roads),
+// otherwise only when Google's route used the Skyway.
 var PASIG_CORRIDORS = {
   sanmarcelino: {
     via: SAN_MARCELINO_VIA,
-    label: SAN_MARCELINO_LABEL
+    label: SAN_MARCELINO_LABEL,
+    tollFree: { from: 0, always: true }
   },
   c3: {
     via: C3_VIA,
-    label: C3_LABEL
+    label: C3_LABEL,
+    tollFree: { from: 2 }   // after the Harbor Link exit at C-3 Road
   },
   mindanao: {
     via: NORTHBOUND_VIA.concat(['Mindanao Avenue corner Congressional Avenue, Quezon City, Metro Manila',
           'C-5 Road, Libis, Quezon City, Metro Manila']),
-    label: 'R-10, Harbor Link, NLEX, Mindanao Avenue and C-5'
+    label: 'R-10, Harbor Link, NLEX, Mindanao Avenue and C-5',
+    tollFree: { from: 3 }   // after NLEX at Mindanao Ave
   },
   // Malabon, Valenzuela and Caloocan: R-10 to the Harbor Link, exit at Karuhatan, then city streets
   harbor: {
     via: NORTHBOUND_VIA,
-    label: 'R-10 and Harbor Link (exit Karuhatan)'
+    label: 'R-10 and Harbor Link (exit Karuhatan)',
+    tollFree: { from: 2 }   // after the Harbor Link exit at Karuhatan
   }
 };
+// Southbound, when Google's route used the Skyway: after the NLEX Connector, toll-free city streets to
+// Osmeña Highway at Quirino Ave, then on to SLEX.
+var SOUTH_ATGRADE_JOIN = 'Osmeña Highway corner Quirino Avenue, Manila, Metro Manila';
+var SOUTH_ATGRADE_LABEL = 'city streets to Osmeña Highway, then SLEX';
+// The Skyway runs right above Osmeña Highway and SLEX from Quirino Ave to Alabang. A route that is on the Skyway
+// only inside this box is the same distance as the at-grade road below it, so it is kept (with a note).
+var SKYWAY_ATGRADE_BOX = { south: 14.400, north: 14.578, west: 120.995, east: 121.060 };
 var PASIG_AUTO_CORRIDORS = ['c3', 'mindanao'];   // what 'auto' compares (Quezon City)
 
 // ---------- METRO MANILA TRUCK RULES (MMDA truck ban) ----------
@@ -73,6 +87,7 @@ var PASIG_AUTO_CORRIDORS = ['c3', 'mindanao'];   // what 'auto' compares (Quezon
 //    cities and Rizal through San Marcelino St (SAN_MARCELINO_VIA); when a route uses one of these roads, the cost
 //    sheet says to travel outside those hours.
 // 3. Business districts with their own delivery windows: flagged when the destination is inside.
+// 4. Skyway: trailers do not use it (Stage 3 included). See tollFree above and getTruckRoute_.
 // [name, regex on Google's step text, [south, west, north, east] box the stretch lies in]
 var TRUCK_BAN_HOURS = '6–10 AM and 5–10 PM, Monday to Saturday (not Sundays or holidays)';
 var TRUCK_WINDOW_DETOUR_MAX = 1.25;
@@ -553,9 +568,11 @@ function calculate_(data) {
   var via = corridor && corridor !== 'auto' ? PASIG_CORRIDORS[corridor].via
           : (tollDirection === 'south' ? SOUTHBOUND_VIA : (tollDirection === 'north' ? NORTHBOUND_VIA
           : (tollDirection === 'metro' ? C3_VIA : [])));
+  var tollFree = corridor && corridor !== 'auto' ? PASIG_CORRIDORS[corridor].tollFree
+          : (tollDirection === 'metro' ? PASIG_CORRIDORS.c3.tollFree : null);
   var findRoute = function (target) {
     if (corridor !== 'auto') {
-      var one = getTruckRoute_(source, target, via, tollDirection);
+      var one = getTruckRoute_(source, target, via, tollDirection, tollFree);
       if (one) one.target = target;
       if (one && corridor) one.corridor = corridor;
       return one;
@@ -563,7 +580,7 @@ function calculate_(data) {
     // Pasig area, no corridor picked: try both, prefer a route off EDSA, then the shorter one
     var found = [];
     PASIG_AUTO_CORRIDORS.forEach(function (k) {
-      var r = getTruckRoute_(source, target, PASIG_CORRIDORS[k].via, 'metro');
+      var r = getTruckRoute_(source, target, PASIG_CORRIDORS[k].via, 'metro', PASIG_CORRIDORS[k].tollFree);
       if (!r) return;
       r.corridor = k;
       r.target = target;
@@ -666,7 +683,8 @@ function calculate_(data) {
     routeVia: routeVia,
     metroCorridor: route && route.corridor ? route.corridor : '',
     routeMap: routeMap,                      // saved with the proposal, small
-    truckCheck: route ? route.truckCheck : '', // clear | alternative | detour | edsa
+    truckCheck: route ? route.truckCheck : '', // clear | alternative | detour | atgrade | edsa | skyway
+    truckSkyway: route ? (route.skywayOff ? 'off' : (route.skyway ? 'parallel' : 'none')) : '',
     truckDetour: route ? (route.detour || '') : '',
     truckWindowRoads: route ? (route.window || []) : [],       // ban-hour roads the route still uses
     truckBanHours: TRUCK_BAN_HOURS,
@@ -1844,7 +1862,7 @@ function getDistance_(source, destination, via) {
 
 // Raw Google Maps driving routes. via: places the route must pass, in order.
 // alternatives: ask for other routes too (Google only gives them when there are no via points).
-function directions_(source, destination, via, alternatives) {
+function directions_(source, destination, via, alternatives, avoidTolls) {
   var directions;
   try {
     var finder = Maps.newDirectionFinder()
@@ -1854,6 +1872,7 @@ function directions_(source, destination, via, alternatives) {
       .setMode(Maps.DirectionFinder.Mode.DRIVING);
     (via || []).forEach(function (w) { finder.addWaypoint(w); });
     if (alternatives) finder.setAlternatives(true);
+    if (avoidTolls) finder.setAvoid(Maps.DirectionFinder.Avoid.TOLLS);
     directions = finder.getDirections();
   } catch (e) {
     // Surface quota / service errors instead of hiding them as "route not found"
@@ -1910,7 +1929,7 @@ function truckDistrictOf_(loc) {
 function pickTruck_(list) {
   list = list.filter(Boolean);
   if (!list.length) return null;
-  var legal = list.filter(function (r) { return !r.edsa; });
+  var legal = list.filter(truckOk_);
   var pool = legal.length ? legal : list;
   var shortest = Math.min.apply(null, pool.map(function (r) { return r.km; }));
   var near = pool.filter(function (r) { return r.km <= shortest * TRUCK_WINDOW_DETOUR_MAX + 0.5; });
@@ -1928,6 +1947,7 @@ function routeInfo_(r) {
     });
   });
   if (!meters) return null;
+  var sky = skywayUse_(r);
   var last = r.legs[r.legs.length - 1];
   var detail = [];
   (r.legs || []).forEach(function (leg) {
@@ -1940,6 +1960,8 @@ function routeInfo_(r) {
     start: r.legs[0].start_location,
     end: last.end_location,
     edsa: usesBannedEdsa_(r),
+    skyway: sky.any,          // Google's route is on the Skyway somewhere
+    skywayOff: sky.off,       // …outside the stretch right above Osmeña Highway / SLEX (a different road: not allowed)
     window: windowRoadsUsed_(r),
     warnings: (r.warnings || []).filter(function (w) { return !/has tolls/i.test(w); }).slice(0, 5),
     driveMin: Math.round(seconds / 60),
@@ -1953,33 +1975,133 @@ function getRoute_(source, destination, via) {
   return routes.length ? routes[0] : null;
 }
 
-// The trailer route: like getRoute_, but kept off EDSA (Magallanes to North Ave.).
-// truckCheck: 'clear' (Google's route was fine), 'alternative' (shortest route off EDSA),
-// 'detour' (sent through a truck road), 'edsa' (no route off EDSA was found: check by hand).
-function getTruckRoute_(source, destination, via, dir) {
+// The trailer route: like getRoute_, but kept off EDSA (Magallanes to North Ave.) and off the Skyway.
+// truckCheck: 'clear' (Google's route was fine), 'alternative' (shortest route off EDSA and the Skyway),
+// 'atgrade' (Google used the Skyway, so the Metro Manila part was looked up toll-free), 'detour' (sent through a
+// truck road to stay off EDSA), 'edsa' / 'skyway' (nothing better was found: check by hand).
+// tollFree: the corridor's { from, always } (see PASIG_CORRIDORS).
+function getTruckRoute_(source, destination, via, dir, tollFree) {
   via = via || [];
-  var routes = directions_(source, destination, via, via.length === 0).map(routeInfo_).filter(Boolean);
+  var points = [source].concat(via, [destination]);
+  var raw = tollFree && tollFree.always
+    ? [directionsPlan_(points, function (i) { return i >= tollFree.from; })]
+    : directions_(source, destination, via, via.length === 0);
+  var routes = raw.filter(Boolean).map(routeInfo_).filter(Boolean);
   if (!routes.length) return null;
   routes.forEach(function (r) { r.viaUsed = via; });
   var googleFirst = routes[0];
   var best = pickTruck_(routes);
-  if (best && !best.edsa) {
+  if (best && truckOk_(best)) {
     best.truckCheck = best === googleFirst ? 'clear' : 'alternative';
     return best;
   }
+  var none = function () { return false; };
+  // Toll-free legs that keep this trip off the Skyway (null when there is no sensible toll-free stretch)
+  var offSkyway = null;
+  if (dir === 'south') {
+    points = [source].concat(via, [SOUTH_ATGRADE_JOIN], [destination]);
+    offSkyway = { points: points, free: function (i) { return i === via.length; }, label: SOUTH_ATGRADE_LABEL };
+  } else if (tollFree && !tollFree.always) {
+    offSkyway = { points: [source].concat(via, [destination]), free: function (i) { return i >= tollFree.from; },
+                  label: 'toll-free city streets after the expressway' };
+  } else if (dir === 'metro' && !via.length) {
+    offSkyway = { points: [source, destination], free: function () { return true; }, label: 'toll-free city streets' };
+  }
+  var tries = [];
+  if (best.skywayOff && offSkyway) tries.push({ points: offSkyway.points, free: offSkyway.free, check: 'atgrade', label: offSkyway.label });
   var detour = TRUCK_DETOUR[dir];
   if (detour) {
-    var d = directions_(source, destination, via.concat(detour.via), false).map(routeInfo_).filter(Boolean)[0];
-    if (d && !d.edsa) {
-      d.truckCheck = 'detour';
-      d.viaUsed = via.concat(detour.via);
-      d.detour = detour.label;
+    var dPoints = [source].concat(via, detour.via, [destination]);
+    tries.push({ points: dPoints, free: none, check: 'detour', label: detour.label });
+    if (offSkyway && dir !== 'south') {
+      tries.push({ points: dPoints, free: offSkyway.free, check: 'detour', label: detour.label });
+    }
+  }
+  for (var t = 0; t < tries.length; t++) {
+    var d = routeInfo_(directionsPlan_(tries[t].points, tries[t].free) || {});
+    if (d && truckOk_(d)) {
+      d.truckCheck = tries[t].check;
+      d.viaUsed = tries[t].points.slice(1, -1);
+      d.detour = tries[t].label;
       return d;
     }
   }
-  routes[0].truckCheck = 'edsa';
-  routes[0].viaUsed = via;
-  return routes[0];
+  var fallback = best || routes[0];
+  fallback.truckCheck = fallback.edsa ? 'edsa' : 'skyway';
+  fallback.viaUsed = via;
+  return fallback;
+}
+
+// A route trailers can take: off EDSA (Magallanes–North Ave) and off the Skyway (except right above the at-grade road)
+function truckOk_(r) { return !!r && !r.edsa && !r.skywayOff; }
+
+// Is Google's route on the Skyway? off = some of it is outside SKYWAY_ATGRADE_BOX (a road trailers can't follow)
+function skywayUse_(route) {
+  var any = false, off = false, b = SKYWAY_ATGRADE_BOX;
+  var inBox = function (p) { return p[0] >= b.south && p[0] <= b.north && p[1] >= b.west && p[1] <= b.east; };
+  (route.legs || []).forEach(function (leg) {
+    (leg.steps || []).forEach(function (st) {
+      var text = String(st.html_instructions || '').replace(/<[^>]+>/g, ' ');
+      if (!/Skyway/i.test(text)) return;
+      any = true;
+      var pts = st.polyline && st.polyline.points ? decodePolyline_(st.polyline.points) : [];
+      if (st.start_location) pts.push([st.start_location.lat, st.start_location.lng]);
+      if (st.end_location) pts.push([st.end_location.lat, st.end_location.lng]);
+      if (pts.some(function (p) { return !inBox(p); })) off = true;
+    });
+  });
+  return { any: any, off: off };
+}
+
+// One Google route through points[0] → … → points[n], where leg i (points[i] → points[i+1]) is looked up toll-free
+// when free(i) is true. Runs of legs with the same setting are one Google request; the pieces are joined.
+function directionsPlan_(points, free) {
+  var parts = [], start = 0;
+  for (var i = 1; i < points.length; i++) {
+    var f = !!free(i - 1);
+    if (i === points.length - 1 || !!free(i) !== f) {
+      var r = directions_(points[start], points[i], points.slice(start + 1, i), false, f)[0];
+      if (!r) return null;
+      parts.push(r);
+      start = i;
+    }
+  }
+  return parts.length === 1 ? parts[0] : joinRoutes_(parts);
+}
+
+// Joins Google routes end to end into one route object (legs, warnings, overview polyline)
+function joinRoutes_(parts) {
+  var legs = [], warnings = [], pts = [];
+  parts.forEach(function (r) {
+    legs = legs.concat(r.legs || []);
+    warnings = warnings.concat(r.warnings || []);
+    var p = r.overview_polyline ? decodePolyline_(r.overview_polyline.points) : [];
+    pts = pts.concat(pts.length ? p.slice(1) : p);
+  });
+  var line = encodePolyline_(pts);
+  // Keep the static map URL short enough: thin the line until it fits
+  while (line.length > 6000 && pts.length > 20) {
+    pts = pts.filter(function (p, k) { return k % 2 === 0 || k === pts.length - 1; });
+    line = encodePolyline_(pts);
+  }
+  return { legs: legs, warnings: warnings, overview_polyline: { points: line } };
+}
+
+// [[lat, lng], ...] → Google's encoded polyline format
+function encodePolyline_(pts) {
+  var out = '', pLat = 0, pLng = 0;
+  var enc = function (v) {
+    v = v < 0 ? ~(v << 1) : (v << 1);
+    var s = '';
+    while (v >= 0x20) { s += String.fromCharCode((0x20 | (v & 0x1f)) + 63); v >>= 5; }
+    return s + String.fromCharCode(v + 63);
+  };
+  pts.forEach(function (p) {
+    var lat = Math.round(p[0] * 1e5), lng = Math.round(p[1] * 1e5);
+    out += enc(lat - pLat) + enc(lng - pLng);
+    pLat = lat; pLng = lng;
+  });
+  return out;
 }
 
 // ---------- Route review: terrain, traffic, road closures and constructions ----------

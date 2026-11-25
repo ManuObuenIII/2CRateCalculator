@@ -2284,9 +2284,15 @@
     function truckCheckHtml(r) {
       var ban = 'trucks are banned on EDSA from Magallanes to North Ave.';
       var h = '';
+      var offSky = r.truckSkyway === 'none';
       if (r.truckCheck === 'clear') h = '<div class="route-map-cap">Truck route check: the route stays off EDSA (' + ban + ')'
+        + (offSky ? ', off the Skyway' : '')
         + (r.truckWindowRoads && !r.truckWindowRoads.length && r.truckBanHours ? ' and off the truck ban-hour roads' : '') + '.</div>';
-      else if (r.truckCheck === 'alternative') h = '<div class="route-map-cap">Truck route check: Google\'s fastest route used EDSA or a truck ban-hour road, so a route trucks can use was taken instead (' + ban + ')</div>';
+      else if (r.truckCheck === 'alternative') h = '<div class="route-map-cap">Truck route check: Google\'s fastest route used EDSA, the Skyway or a truck ban-hour road, so a route trailers can use was taken instead (' + ban + ')</div>';
+      else if (r.truckCheck === 'atgrade') h = '<div class="route-map-cap">Truck route check: Google\'s route used the Skyway, which trailers do not use, so the trip was sent along '
+        + esc(r.truckDetour || 'toll-free city streets') + ' instead.</div>';
+      else if (r.truckCheck === 'skyway') h = '<div class="note warn-note">Check the route: Google Maps only found routes that use the Skyway, which trailers do not use. '
+        + 'Confirm the trailer route and enter the distance by hand if it differs.</div>';
       else if (r.truckCheck === 'truckroute') h = '<div class="route-map-cap">Truck route check: sent along the ' + esc(r.routeVia) + ', keeping off EDSA and the truck ban-hour roads.</div>';
       else if (r.truckCheck === 'detour') h = '<div class="route-map-cap">Truck route check: sent via ' + esc(r.truckDetour) + ' to stay off EDSA (' + ban + ')</div>';
       else if (r.truckCheck === 'edsa') h = '<div class="note warn-note">Check the route: Google Maps only found routes that use EDSA, where '
@@ -2296,6 +2302,8 @@
           + '. Trucks are not allowed there ' + esc(r.truckBanHours || '6–10 AM and 5–10 PM, Monday to Saturday') + ', so schedule the trip outside those hours.</div>';
       }
       if (r.truckDistrict) h += '<div class="note warn-note">Delivery in ' + esc(r.truckDistrict.name) + ': ' + esc(r.truckDistrict.rule) + '.</div>';
+      if (r.truckSkyway === 'parallel') h += '<div class="route-map-cap">Google drew part of this trip on the Skyway above Osmeña Highway / SLEX. '
+        + 'Trailers take the at-grade road right below it; the distance is about the same.</div>';
       return h;
     }
 
@@ -2560,6 +2568,7 @@
       // Things worth a second look
       var flags = [];
       if (r.truckCheck === 'edsa') flags.push('Google only found routes through EDSA. Check the distance against the actual trailer route.');
+      if (r.truckCheck === 'skyway') flags.push('Google only found routes on the Skyway, which trailers do not use. Check the distance against the actual trailer route.');
       if (r.truckWindowRoads && r.truckWindowRoads.length) flags.push('The route uses ' + r.truckWindowRoads.length + ' truck ban-hour road' + (r.truckWindowRoads.length === 1 ? '' : 's') + ': travel outside ' + esc(r.truckBanHours || '6–10 AM and 5–10 PM, Monday to Saturday') + '.');
       if (r.truckDistrict) flags.push('Destination is in ' + esc(r.truckDistrict.name) + ': ' + esc(r.truckDistrict.rule) + '.');
       if (r.grossProfit < 0) flags.push('The billed rate does not cover the direct cost of this trip.');
@@ -5208,7 +5217,9 @@
       h += section('Driver and truck') + '<table class="review-grid">' + truck.map(function (x) { return '<tr><td class="k">' + x[0] + '</td><td class="v">' + x[1] + '</td></tr>'; }).join('') + '</table>';
       var route = [];
       if (rec.truckCheck === 'edsa') route.push('<b>Check the route:</b> Google only found routes through EDSA (trucks are banned from Magallanes to North Ave.).');
-      else if (rec.truckCheck) route.push('Route stays off the EDSA truck ban' + (rec.truckDetour ? ' via ' + esc(rec.truckDetour) : '') + '.');
+      else if (rec.truckCheck === 'skyway') route.push('<b>Check the route:</b> Google only found routes on the Skyway.');
+      else if (rec.truckCheck) route.push('Route stays off the EDSA truck ban' + (rec.truckSkyway ? ' and off the Skyway' : '') + (rec.truckDetour ? ' via ' + esc(rec.truckDetour) : '') + '.');
+      if (rec.truckSkyway) route.push('<b>No Skyway:</b> trailers stay on the at-grade roads (Osmeña Highway, SLEX).');
       var tolls = rec.tollRoute || [];
       if (tolls.length) {
         route.push('Tolls (Class 3): ' + tolls.map(function (t) { return esc(t.expressway) + ' ' + esc(t.entry) + ' → ' + esc(t.exit) + ' ' + fmt(t.oneWay) + (t.back !== t.oneWay ? ' / back ' + fmt(t.back) : ''); }).join('; ')
